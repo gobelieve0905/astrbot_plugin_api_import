@@ -118,12 +118,32 @@ def readable_text(raw, key=""):
 def grounded_document(raw, text, target):
     if not isinstance(raw, str) or len(raw.encode()) > 500_000:
         raise DiscoveryError("模型返回的接口草稿无效或过大，请缩小文档范围后重试")
-    raw = raw.strip()
-    if raw.startswith("```json") and raw.endswith("```"):
-        raw = raw[7:-3].strip()
-    elif raw.startswith("```") and raw.endswith("```"):
-        raw = raw[3:-3].strip()
-    document = document_from_text(raw)
+    raw = re.sub(r"<think>.*?</think>", "", raw, flags=re.S).strip()
+    if not raw:
+        raise DiscoveryError("模型返回了空正文，请选择其他文档解析模型后重试")
+    candidates = [raw]
+    candidates.extend(re.findall(r"```(?:json|yaml|yml)?\s*([\s\S]*?)```", raw)[:8])
+    # Some providers wrap JSON in prose. Decode complete objects, never repair truncated JSON.
+    decoder = json.JSONDecoder()
+    for match in list(re.finditer(r"\{", raw))[:100]:
+        try:
+            value, _ = decoder.raw_decode(raw[match.start() :])
+        except (ValueError, RecursionError):
+            continue
+        if isinstance(value, dict) and "openapi" in value and "paths" in value:
+            candidates.append(json.dumps(value))
+    documents = {}
+    for candidate in candidates:
+        try:
+            value = document_from_text(candidate)
+        except DiscoveryError:
+            continue
+        documents[json.dumps(value, sort_keys=True)] = value
+    if not documents:
+        raise DiscoveryError("模型未返回完整的接口草稿，请缩短文档或选择其他解析模型后重试")
+    if len(documents) > 1:
+        raise DiscoveryError("模型返回多个不同草稿，无法确定应使用哪个，请缩小文档范围后重试")
+    document = next(iter(documents.values()))
     if document.get("swagger"):
         raise DiscoveryError("模型草稿格式不符合要求，请重试")
     # Never accept an endpoint justified only by a model's claim about a source.

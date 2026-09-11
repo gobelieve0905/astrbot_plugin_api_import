@@ -37,6 +37,23 @@ class PageTextTest(unittest.TestCase):
             operation = D.convert_document(result, "https://api.example.test", api_key="secret")[0]
             self.assertFalse(operation["supported"])
 
+    def test_model_prose_and_thinking_wrappers(self):
+        body = json.dumps(extracted())
+        for raw in [
+            "以下为接口定义：\n```json\n" + body + "\n```\n请核对。",
+            "<think>reasoning</think>" + body,
+        ]:
+            parsed = M.grounded_document(raw, TEXT, "https://api.example.test")
+            self.assertIn("/report", parsed["paths"])
+        for raw in [
+            "",
+            "<think>no answer</think>",
+            body[:-4],
+            body + json.dumps({**extracted(), "info": {"title": "other", "version": "2"}}),
+        ]:
+            with self.assertRaises(D.DiscoveryError):
+                M.grounded_document(raw, TEXT, "https://api.example.test")
+
     def test_unfounded_auth_rejected_and_warning_preserved(self):
         data = extracted()
         data["components"]["securitySchemes"]["Key"]["x-evidence"] = "invented"
