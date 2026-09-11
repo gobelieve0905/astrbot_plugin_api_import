@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="zh-CN">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>API 管理</title><link rel="stylesheet" href="./style.css"></head>
+<body>
+<main>
+  <header><div><p class="eyebrow">API TOOLBOX <span>0.0.1</span></p><h1>API 管理</h1><p class="muted">将你的接口，变成对话中可用的工具。</p></div><button class="primary" id="add">＋ 新增 API</button></header>
+  <div id="notice" class="notice" role="status" aria-live="polite" hidden></div>
+  <section class="toolbar"><label class="search"><span>搜索</span><input id="search" type="search" placeholder="名称、用途或请求地址" aria-label="搜索 API"></label><span id="count" class="muted"></span><button id="refresh">刷新列表</button></section>
+  <section id="list" aria-label="API 列表"><p class="muted">正在连接 AstrBot…</p></section>
+  <footer>保存后立即生效 · 接口定义与原插件配置同步</footer>
+</main>
+<dialog id="editor" aria-labelledby="editor-title">
+ <div class="dialog-head"><div><p class="eyebrow">接口定义</p><h2 id="editor-title">新增 API</h2></div><button id="close-editor" aria-label="关闭编辑器">✕</button></div>
+ <div class="tabs" role="tablist" aria-label="填写方式"><button id="tab-form" data-mode="form" role="tab" aria-selected="true">可视化表单</button><button id="tab-curl" data-mode="curl" role="tab" aria-selected="false">粘贴 cURL</button><button id="tab-json" data-mode="json" role="tab" aria-selected="false">JSON 编辑</button></div>
+ <div id="editor-error" class="notice error" role="alert" hidden></div>
+ <div class="dialog-body">
+  <section id="panel-curl" role="tabpanel" hidden><h3>从请求示例开始</h3><p class="muted">粘贴一条 cURL，解析为草稿后继续填写用途和参数。解析不会执行请求。</p><label>cURL 命令<textarea id="curl-text" rows="10" spellcheck="false" placeholder="curl 'https://api.example.com/items?limit=20'"></textarea></label><button id="parse-curl" class="primary">解析为表单草稿</button><p class="hint">支持 URL、请求方法、Header、JSON 与表单。不执行 shell，不读取本地文件；暂不支持的选项会明确提示。</p></section>
+  <section id="panel-json" role="tabpanel" hidden><p class="muted">填写单个接口定义对象。适合复制现有配置，或编辑复杂 JSON Schema。</p><label>接口 JSON<textarea id="json-text" rows="22" spellcheck="false"></textarea></label></section>
+  <section id="panel-form" role="tabpanel">
+   <div class="grid"><label>工具名称 <span class="required">*</span><input id="name" placeholder="例如 query_items" maxlength="48" required><small>字母开头，使用字母、数字、下划线；实际工具名带 api_ 前缀。</small></label><label class="switch-label"><input id="enabled" type="checkbox">启用此 API</label></div>
+   <label>用途说明 <span class="required">*</span><textarea id="description" rows="2" placeholder="说明何时使用、返回什么；修改类接口请说明会修改哪些数据。"></textarea></label>
+   <div class="request-line"><label>请求方法<select id="method"><option>GET</option><option>POST</option><option>PUT</option><option>PATCH</option><option>DELETE</option><option>HEAD</option><option>OPTIONS</option></select></label><label>请求地址 <span class="required">*</span><input id="url" placeholder="https://api.example.com/items/{id}"></label></div>
+   <section class="form-section"><div class="section-head"><div><h3>模型填写的参数</h3><p class="hint">定义模型调用时需要提供的输入，再在下方请求字段中引用。</p></div><button id="add-param">＋ 添加参数</button></div><div id="params"></div><button id="detect-path" class="subtle">从地址识别路径参数</button></section>
+   <section class="form-section"><div class="section-head"><h3>查询参数 · Query</h3><button data-add-map="query">＋ 添加字段</button></div><div id="map-query"></div></section>
+   <details class="form-section" id="headers-details"><summary>请求头 · Headers</summary><div id="map-headers"></div><button data-add-map="headers">＋ 添加请求头</button></details>
+   <section class="form-section"><div class="section-head"><h3>请求体 · Body</h3><select id="body-kind" aria-label="请求体类型"><option value="none">无请求体</option><option value="json">JSON 字段表单</option><option value="form">表单编码</option><option value="raw">完整 JSON 请求体</option></select></div><div id="body-fields" hidden><div id="map-body"></div><button data-add-map="body">＋ 添加字段</button></div><label id="body-raw-label" hidden>完整请求体<textarea id="body-raw" rows="5" spellcheck="false"></textarea></label></section>
+   <details class="form-section"><summary>响应与执行设置</summary><div class="grid"><label>结果路径（JSON Pointer）<input id="pointer" placeholder="例如 /data/items，留空返回全部"></label><label>超时（秒）<input id="timeout" type="number" min="1" max="120" value="30"></label><label>预览字符数<input id="preview" type="number" min="100" max="20000" value="4000"></label><label>响应大小上限（字节）<input id="max-bytes" type="number" min="1" max="20971520" value="5242880"></label></div><label class="check"><input id="save-result" type="checkbox">保存完整单次响应为服务器本地 JSON 文件</label></details>
+  </section>
+ </div>
+ <div class="dialog-actions"><span id="save-note" class="muted">保存接口定义，不会调用目标 API。</span><button id="cancel">取消</button><button id="save" class="primary">保存并生效</button></div>
+</dialog>
+<dialog id="confirm-dialog" aria-labelledby="confirm-title"><h2 id="confirm-title"></h2><p id="confirm-text"></p><div class="dialog-actions"><button id="confirm-no">取消</button><button id="confirm-yes" class="danger">确认</button></div></dialog>
+<datalist id="parameter-names"></datalist>
+<script type="module" src="./app.js"></script>
+</body></html>

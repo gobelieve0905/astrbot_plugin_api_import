@@ -1,14 +1,18 @@
 """AstrBot integration for administrator-defined HTTP tools."""
 
+import asyncio
 import json
 
 from astrbot.api import AstrBotConfig, logger
 from astrbot.api.event import AstrMessageEvent, filter
 from astrbot.api.star import Context, Star, StarTools
+from astrbot.api.web import error_response, json_response, request
 from astrbot.core.agent.tool import FunctionTool
 
+from .catalog import Catalog, ConflictError
 from .definitions import DefinitionError, parse_definitions
 from .engine import Executor
+from .importing import import_curl
 
 
 class ImportedTool(FunctionTool):
@@ -20,8 +24,14 @@ class ImportedTool(FunctionTool):
         )
         self.definition = definition
         self.executor = executor
+        self.available = True
 
     async def call(self, context, **kwargs):
+        if not self.available or not self.active:
+            return json.dumps(
+                {"ok": False, "error": "该工具已更新、删除或停用，请重新选择工具"},
+                ensure_ascii=False,
+            )
         return json.dumps(await self.executor.execute(self.definition, kwargs), ensure_ascii=False)
 
 
@@ -33,21 +43,66 @@ class ApiImportPlugin(Star):
         self.tools = []
         self.executor = None
         self.configuration_error = None
+        self.closed = False
+        self.catalog = Catalog(config, self._apply_saved)
+        self.edit_lock = asyncio.Lock()
+        self.web_handlers = []
+        for route, handler, methods in (
+            ("catalog", self.page_catalog, ["GET"]),
+            ("save", self.page_save, ["POST"]),
+            ("delete", self.page_delete, ["POST"]),
+            ("import-curl", self.page_import_curl, ["POST"]),
+        ):
+            self.context.register_web_api(
+                f"/astrbot_plugin_api_import/{route}", handler, methods, "API 接口管理"
+            )
+            self.web_handlers.append(handler)
+
+    def _prepare_tools(self, definitions):
+        manager = self.context.get_llm_tool_manager()
+        owned = {id(tool) for tool in self.tools}
+        existing = {tool.name for tool in manager.func_list if id(tool) not in owned}
+        if any(item.enabled and item.tool_name in existing for item in definitions):
+            raise DefinitionError("存在与其他插件同名的工具，请修改接口 name")
+        return [ImportedTool(item, self.executor) for item in definitions if item.enabled]
+
+    def _apply_saved(self, raw, definitions):
+        # No awaits between validation, atomic config persistence and registry swap.
+        # A failed write restores the old registry and leaves cached tools usable.
+        if self.closed:
+            raise DefinitionError("插件已卸载，请刷新页面")
+        new_tools = self._prepare_tools(definitions)
+        manager = self.context.get_llm_tool_manager()
+        previous_registry = list(manager.func_list)
+        previous_raw = self.config.get("tools_json", "[]")
+        owned = {id(tool) for tool in self.tools}
+        try:
+            manager.func_list[:] = [tool for tool in manager.func_list if id(tool) not in owned]
+            if new_tools:
+                self.context.add_llm_tools(*new_tools)
+            self.config["tools_json"] = raw
+            self.config.save_config()
+        except Exception:
+            manager.func_list[:] = previous_registry
+            self.config["tools_json"] = previous_raw
+            raise
+        for tool in self.tools:
+            tool.available = False
+        self.tools = new_tools
+        self.definitions = definitions
+        self.configuration_error = None
 
     async def initialize(self):
+        self.executor = Executor(StarTools.get_data_dir("astrbot_plugin_api_import") / "results")
         try:
             definitions = parse_definitions(self.config.get("tools_json", "[]"))
-            manager = self.context.get_llm_tool_manager()
-            existing = {tool.name for tool in manager.func_list}
-            if any(item.enabled and item.tool_name in existing for item in definitions):
-                raise DefinitionError("存在与其他插件同名的工具，请修改接口 name")
+            tools = self._prepare_tools(definitions)
         except DefinitionError as exc:
             self.configuration_error = str(exc)
             logger.error("API 工具配置未加载: " + self.configuration_error)
             return
-        self.executor = Executor(StarTools.get_data_dir("astrbot_plugin_api_import") / "results")
         self.definitions = definitions
-        self.tools = [ImportedTool(item, self.executor) for item in definitions if item.enabled]
+        self.tools = tools
         try:
             if self.tools:
                 self.context.add_llm_tools(*self.tools)
@@ -55,6 +110,41 @@ class ApiImportPlugin(Star):
             await self.terminate()
             raise
         logger.info(f"API 工具接入已加载 {len(self.tools)} 个工具")
+
+    async def page_catalog(self):
+        if self.closed:
+            return error_response("插件已卸载，请刷新页面", status_code=503)
+        state = self.catalog.snapshot()
+        state["error"] = state["error"] or self.configuration_error
+        return json_response(state)
+
+    async def _page_mutate(self, action):
+        try:
+            payload = await request.json()
+            async with self.edit_lock:
+                return json_response(self.catalog.mutate(action, payload))
+        except ConflictError as exc:
+            return error_response(str(exc), status_code=409)
+        except DefinitionError as exc:
+            return error_response(str(exc))
+        except Exception:
+            logger.error("API 管理保存失败，已保留原配置和工具")
+            return error_response("保存失败，原配置和工具已保留", status_code=500)
+
+    async def page_save(self):
+        return await self._page_mutate("save")
+
+    async def page_delete(self):
+        return await self._page_mutate("delete")
+
+    async def page_import_curl(self):
+        payload = await request.json(default={})
+        try:
+            if not isinstance(payload, dict):
+                raise DefinitionError("请求必须是 JSON 对象")
+            return json_response({"definition": import_curl(payload.get("text"))})
+        except (DefinitionError, ValueError) as exc:
+            return error_response(str(exc))
 
     @filter.permission_type(filter.PermissionType.ADMIN)
     @filter.command("api_tools")
@@ -99,6 +189,12 @@ class ApiImportPlugin(Star):
         yield event.plain_result(json.dumps(records, ensure_ascii=False))
 
     async def terminate(self):
+        self.closed = True
+        for tool in self.tools:
+            tool.available = False
+        self.context.registered_web_apis[:] = [
+            route for route in self.context.registered_web_apis if route[1] not in self.web_handlers
+        ]
         manager = self.context.get_llm_tool_manager()
         owned = {id(tool) for tool in self.tools}
         manager.func_list[:] = [tool for tool in manager.func_list if id(tool) not in owned]

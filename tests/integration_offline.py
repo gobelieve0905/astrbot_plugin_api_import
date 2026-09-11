@@ -70,8 +70,81 @@ async def main():
     )
     outputs = [result async for result in plugin.test_tool(event)]
     assert json.loads(outputs[0])["data"] == {"text": "hello world"}
+    # Save through actual PluginRequest handlers using the real atomic AstrBotConfig.
+    from astrbot.api import AstrBotConfig
+    from astrbot.api.web import PluginRequest, bind_request_context
+    from starlette.requests import Request
+
+    config_path = str(Path(workspace.name) / "api-config.json")
+    plugin.config = AstrBotConfig(
+        config_path=config_path, default_config={"tools_json": json.dumps([definition])}
+    )
+    plugin.catalog.config = plugin.config
+
+    async def web_call(handler, payload):
+        body = json.dumps(payload).encode()
+
+        async def receive():
+            return {"type": "http.request", "body": body, "more_body": False}
+
+        req = Request(
+            {
+                "type": "http",
+                "method": "POST",
+                "path": "/test",
+                "headers": [],
+                "query_string": b"",
+                "scheme": "http",
+                "server": ("test", 80),
+            },
+            receive,
+        )
+        with bind_request_context(
+            PluginRequest(req, plugin_name="astrbot_plugin_api_import", username="test")
+        ):
+            return await handler()
+
+    revision = plugin.catalog.snapshot()["revision"]
+    updated = {**definition, "name": "renamed"}
+    response = await web_call(
+        plugin.page_save, {"revision": revision, "original_name": "echo", "definition": updated}
+    )
+    assert response.status_code == 200
+    assert (
+        json.loads(Path(config_path).read_text(encoding="utf-8-sig"))["tools_json"]
+        == plugin.config["tools_json"]
+    )
+    assert not json.loads(await tool.call(None, text="old cached call"))["ok"]
+    assert [item.name for item in manager.func_list] == ["foreign", "api_renamed"]
+    stale = await web_call(plugin.page_delete, {"revision": revision, "name": "renamed"})
+    assert stale.status_code == 409
+    current_tool = plugin.tools[0]
+    # A persistence error must restore registry, memory configuration and old tool availability.
+    from unittest.mock import patch
+
+    current_raw = plugin.config["tools_json"]
+    with patch.object(AstrBotConfig, "save_config", side_effect=OSError("test disk failure")):
+        failure = await web_call(
+            plugin.page_save,
+            {
+                "revision": plugin.catalog.snapshot()["revision"],
+                "original_name": "renamed",
+                "definition": definition,
+            },
+        )
+    assert failure.status_code == 500 and plugin.config["tools_json"] == current_raw
+    assert plugin.tools[0] is current_tool and current_tool.available
+    assert manager.func_list == [foreign, current_tool]
+    imported = await web_call(plugin.page_import_curl, {"text": "curl https://example.test"})
+    assert imported.status_code == 200 and not json.loads(imported.body)["definition"]["enabled"]
+    deleted = await web_call(
+        plugin.page_delete, {"revision": plugin.catalog.snapshot()["revision"], "name": "renamed"}
+    )
+    assert deleted.status_code == 200 and manager.func_list == [foreign]
+    assert json.loads(Path(config_path).read_text(encoding="utf-8-sig"))["tools_json"] == "[]"
     await plugin.terminate()
     assert manager.func_list == [foreign]
+    assert not context.registered_web_apis
     assert not json.loads(await tool.call(None, text="late"))["ok"]
     # Reload registers exactly one tool and respects disabled definitions.
     again = module.ApiImportPlugin(context, {"tools_json": json.dumps([definition])})

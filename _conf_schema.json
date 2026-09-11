@@ -2,7 +2,7 @@
   "tools_json": {
     "type": "text",
     "description": "API 工具定义（JSON 数组）",
-    "hint": "每个接口定义一个工具。填写方法见 README 和 examples/tools.json；保存后重载插件生效。空数组不注册任何 API。",
+    "hint": "推荐在插件详情 → API 管理页面中新增和编辑，页面保存立即生效。此处保留完整 JSON 数组入口；手动修改后需重载插件。空数组不注册任何 API。",
     "default": "[]"
   }
 }
