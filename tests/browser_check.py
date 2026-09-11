@@ -84,7 +84,9 @@ class Handler(BaseHTTPRequestHandler):
 
                     async def reader(prompt, system):
                         assert "synthetic-key" not in prompt
-                        return json.dumps(ordinary_spec())
+                        generated = ordinary_spec()
+                        generated["paths"]["/report"]["get"]["x-method-inferred"] = True
+                        return json.dumps(generated)
 
                     def respond(req):
                         if req.url.host == "docs.example.test":
@@ -269,6 +271,7 @@ def run():
         page.locator("#discover").click()
         page.locator("#discovered-operations .operation-row").wait_for()
         assert "模型" in page.locator("#discovery-message").inner_text()
+        assert "推断，请确认" in page.locator("#discovered-operations").inner_text()
         assert page.locator("#discovered-operations input:checked").count() == 0
         page.locator("#discovered-operations summary").click()
         assert (

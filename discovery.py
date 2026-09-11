@@ -427,6 +427,14 @@ def operation_definition(
     description = str(
         operation.get("summary") or operation.get("description") or method + " " + path
     )[:3500]
+    notes = str(operation.get("x-import-notes", ""))[:1000]
+    inferred_method = bool(operation.get("x-method-inferred"))
+    if inferred_method:
+        notes = (
+            "请求方式根据文档中的只读 URL 查询说明推断为 GET，勾选操作即确认使用该方式。" + notes
+        )
+    if notes:
+        description = (description + "\n接入说明：" + notes)[:4000]
     definition = {
         "name": name,
         "description": description,
@@ -444,7 +452,8 @@ def operation_definition(
         "supported": True,
         "reason": None,
         "evidence": str(operation.get("x-evidence", ""))[:1000],
-        "notes": str(operation.get("x-import-notes", ""))[:1000],
+        "notes": notes,
+        "needs_confirmation": inferred_method,
     }
 
 

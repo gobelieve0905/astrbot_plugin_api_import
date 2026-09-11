@@ -37,6 +37,20 @@ class PageTextTest(unittest.TestCase):
             operation = D.convert_document(result, "https://api.example.test", api_key="secret")[0]
             self.assertFalse(operation["supported"])
 
+    def test_inferred_get_is_disabled_draft_but_inferred_writes_are_blocked(self):
+        data = extracted()
+        data["paths"]["/report"]["get"]["x-method-inferred"] = True
+        parsed = M.grounded_document(json.dumps(data), TEXT, "https://api.example.test")
+        result = D.convert_document(parsed, "https://api.example.test", api_key="secret")[0]
+        self.assertTrue(result["supported"] and result["needs_confirmation"])
+        self.assertFalse(result["definition"]["enabled"])
+        self.assertIn("推断", result["definition"]["description"])
+        data["paths"]["/report"]["post"] = data["paths"]["/report"].pop("get")
+        parsed = M.grounded_document(json.dumps(data), TEXT, "https://api.example.test")
+        self.assertFalse(
+            D.convert_document(parsed, "https://api.example.test", api_key="secret")[0]["supported"]
+        )
+
     def test_model_prose_and_thinking_wrappers(self):
         body = json.dumps(extracted())
         for raw in [

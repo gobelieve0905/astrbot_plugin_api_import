@@ -304,7 +304,7 @@ function operationGroups(container, records, permissionMode = false) {
       const duplicate = !permissionMode && record.supported && state.items.some((item) => item.name === record.definition.name);
       control.disabled = !record.supported || duplicate;
       control.dataset.operationName = record.definition?.name || '';
-      const title = labeled(`${record.method} ${record.path}`, control); title.className = 'check';
+      const title = labeled(`${record.method} ${record.path}${record.needs_confirmation ? "（推断，请确认）" : ""}`, control); title.className = 'check';
       row.append(title, el('p', record.description || '', 'muted'));
       if (record.notes) row.append(el('p', `文档解析说明：${record.notes}`, 'muted'));
       if (record.auth) row.append(el('small', `Key 方式：${record.auth}；实际权限未验证`));
