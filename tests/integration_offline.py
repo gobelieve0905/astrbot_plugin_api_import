@@ -212,6 +212,17 @@ async def main():
             },
         )
     assert unavailable.status_code == 400
+    model.text_chat = AsyncMock(side_effect=RuntimeError("private-upstream-detail"))
+    with patch.object(context, "get_using_provider_async", AsyncMock(return_value=model)):
+        failed_model = await web_call(
+            plugin.page_discover,
+            {
+                "target_url": "https://api.example.test",
+                "document_text": TEXT,
+            },
+        )
+    assert failed_model.status_code == 400
+    assert b"private-upstream-detail" not in failed_model.body
     await plugin.terminate()
     assert manager.func_list == [foreign]
     assert not context.registered_web_apis

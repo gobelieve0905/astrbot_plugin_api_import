@@ -639,7 +639,7 @@ class Discovery:
             raise DiscoveryError("请求必须是 JSON 对象")
         try:
             async with asyncio.timeout(
-                120 if payload.get("document_url") or payload.get("document_text") else 25
+                210 if payload.get("document_url") or payload.get("document_text") else 25
             ):
                 return await self.discover(payload)
         except TimeoutError as exc:

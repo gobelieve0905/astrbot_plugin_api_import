@@ -162,10 +162,20 @@ class ApiImportPlugin(Star):
         provider = await self.context.get_using_provider_async()
         if provider is None:
             raise DiscoveryError("请先在 AstrBot 配置默认聊天模型，再识别普通文档")
-        async with asyncio.timeout(90):
-            result = await provider.text_chat(
-                prompt=prompt, system_prompt=system_prompt, contexts=[], func_tool=None
-            )
+        try:
+            async with asyncio.timeout(180):
+                result = await provider.text_chat(
+                    prompt=prompt, system_prompt=system_prompt, contexts=[], func_tool=None
+                )
+        except TimeoutError:
+            raise DiscoveryError(
+                "文档解析模型超过 180 秒未完成，请缩短文档或调整 AstrBot 默认模型后重试"
+            ) from None
+        except Exception as exc:
+            logger.warning("API 文档模型请求失败，异常类型：" + type(exc).__name__)
+            raise DiscoveryError(
+                "文档解析模型请求失败，请检查 AstrBot 默认聊天模型是否可用"
+            ) from None
         return result.completion_text
 
     async def page_discover(self):

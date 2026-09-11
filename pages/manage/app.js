@@ -337,7 +337,7 @@ $('discover').onclick = async () => {
   if (busy) return;
   automaticResult = null;
   $('discovered-operations').replaceChildren(); notice('', false, true);
-  $('discovery-message').hidden = false; $('discovery-message').textContent = '正在查找接口文档并识别操作…';
+  $('discovery-message').hidden = false; $('discovery-message').textContent = '正在读取文档并识别操作；普通文档的模型解析可能需要 1–3 分钟…';
   busy = true; lockEditor(true);
   try {
     const result = await bridge.apiPost('discover', { target_url: $('auto-url').value.trim(), api_key: $('auto-key').value, document_url: $('auto-doc-url').value.trim(), document_text: $('auto-doc-text').value, auth: { mode: $('auto-auth').value, name: $('auto-auth-name').value.trim() } });

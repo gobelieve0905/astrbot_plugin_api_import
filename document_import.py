@@ -22,6 +22,8 @@ method 必须有依据，添加 x-method-evidence 原文短片段（HTTP 方法�
 动态参数名应按文档明确示例或有限枚举展开；无法完整表达的可选动态筛选功能应省略，并在 x-import-notes 说明限制；不可省略的必填信息缺失才使用 x-import-warning。
 鉴权使用 securitySchemes（apiKey header/query 或 http bearer），每个 scheme 添加 x-evidence 引用原文。
 不要输出任何凭据值。已有的 [REDACTED_KEY] 只是占位符，不是参数默认值。匿名接口必须有文档依据。
+输出要精简：多个操作的公共参数放在 components.parameters 中并使用本地 $ref 复用。
+列表参数保留字符串或数组形式，不枚举所有组合。不要复制响应字段表，不生成大段说明。
 JSON 和 form 请求体遵循文档，不生成响应 schema。使用完整请求路径；server 仅允许 target 同源。
 没有 API 操作的网页（例如登录页、验证码、目录）返回空 paths，并在 x-import-warning 说明。
 说明和摘要用简体中文，参数名和文档证据保留原文。所有生成内容只是草稿。
