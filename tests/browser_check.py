@@ -10,7 +10,7 @@ import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
-from discovery_fixture import spec
+from discovery_fixture import TEXT, ordinary_spec, spec
 from playwright.sync_api import sync_playwright
 from test_engine import Definitions, root
 
@@ -78,13 +78,19 @@ class Handler(BaseHTTPRequestHandler):
                 async def discover():
                     import httpx
 
+                    async def reader(prompt, system):
+                        assert "synthetic-key" not in prompt
+                        return json.dumps(ordinary_spec())
+
                     def respond(req):
+                        if req.url.host == "docs.example.test":
+                            return httpx.Response(200, text="<main><pre>" + TEXT + "</pre></main>")
                         if "/undocumented/" in req.url.path or req.url.path == "/undocumented":
                             return httpx.Response(404)
                         return httpx.Response(200, json=spec())
 
                     engine = DiscoveryModule.Discovery(
-                        httpx.AsyncClient(transport=httpx.MockTransport(respond))
+                        httpx.AsyncClient(transport=httpx.MockTransport(respond)), reader=reader
                     )
                     try:
                         return await engine.run(body)
@@ -248,6 +254,27 @@ def run():
         page.locator("#cancel").click()
         page.locator("#confirm-yes").click()
         page.locator("#editor").wait_for(state="hidden")
+        # Ordinary platform webpage is a primary field, with source evidence in a disabled draft.
+        page.locator("#add").click()
+        assert page.locator("#auto-doc-url").is_visible()
+        page.locator("#auto-url").fill("https://api.example.test")
+        page.locator("#auto-key").fill("synthetic-key")
+        page.locator("#auto-doc-url").fill("https://docs.example.test/reporting-guide")
+        page.locator("#discover").click()
+        page.locator("#discovered-operations .operation-row").wait_for()
+        assert "模型" in page.locator("#discovery-message").inner_text()
+        assert page.locator("#discovered-operations input:checked").count() == 0
+        page.locator("#discovered-operations summary").click()
+        assert (
+            "GET https://api.example.test/report"
+            in page.locator("#discovered-operations").inner_text()
+        )
+        assert "UTC 日期" in page.locator("#discovered-operations").inner_text()
+        page.screenshot(path=str(output / "ordinary-document.png"))
+        page.locator("#save").click()
+        page.locator("#editor").wait_for(state="hidden")
+        assert catalog.snapshot()["items"][-1]["request"]["query"]["api_key"] == "synthetic-key"
+        assert not catalog.snapshot()["items"][-1]["enabled"]
         # Narrow screen layout, modal and body do not overflow horizontally.
         page.set_viewport_size({"width": 390, "height": 844})
         assert page.evaluate("document.documentElement.scrollWidth <= innerWidth")

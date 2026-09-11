@@ -177,6 +177,41 @@ async def main():
     restored = AstrBotConfig(config_path=config_path, default_config={"tools_json": "[]"})
     assert len(json.loads(restored["tools_json"])) == 4
     assert all(not item["enabled"] for item in json.loads(restored["tools_json"]))
+    # Ordinary documents use a provider with no tools, chat history or API credential.
+    from unittest.mock import AsyncMock
+
+    from discovery_fixture import TEXT, ordinary_spec
+
+    model_call = AsyncMock(
+        return_value=types.SimpleNamespace(completion_text=json.dumps(ordinary_spec()))
+    )
+    model = types.SimpleNamespace(text_chat=model_call)
+    with patch.object(context, "get_using_provider_async", AsyncMock(return_value=model)):
+        ordinary = await web_call(
+            plugin.page_discover,
+            {
+                "target_url": "https://api.example.test",
+                "api_key": "private-test-key",
+                "document_text": TEXT,
+            },
+        )
+    assert ordinary.status_code == 200
+    result = json.loads(ordinary.body)
+    assert result["inferred"] and result["operations"][0]["supported"]
+    kwargs = model_call.call_args.kwargs
+    assert kwargs["contexts"] == [] and kwargs["func_tool"] is None
+    assert "private-test-key" not in json.dumps(kwargs)
+    assert not result["operations"][0]["definition"]["enabled"]
+    assert len(plugin.catalog.snapshot()["items"]) == 4  # Discovery never saves.
+    with patch.object(context, "get_using_provider_async", AsyncMock(return_value=None)):
+        unavailable = await web_call(
+            plugin.page_discover,
+            {
+                "target_url": "https://api.example.test",
+                "document_text": TEXT,
+            },
+        )
+    assert unavailable.status_code == 400
     await plugin.terminate()
     assert manager.func_list == [foreign]
     assert not context.registered_web_apis

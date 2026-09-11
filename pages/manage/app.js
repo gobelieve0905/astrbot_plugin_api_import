@@ -306,12 +306,15 @@ function operationGroups(container, records, permissionMode = false) {
       control.dataset.operationName = record.definition?.name || '';
       const title = labeled(`${record.method} ${record.path}`, control); title.className = 'check';
       row.append(title, el('p', record.description || '', 'muted'));
+      if (record.notes) row.append(el('p', `文档解析说明：${record.notes}`, 'muted'));
       if (record.auth) row.append(el('small', `Key 方式：${record.auth}；实际权限未验证`));
       if (record.reason || duplicate) row.append(el('small', duplicate ? '已接入，请在调用权限中调整开关。' : record.reason, 'operation-warning'));
       if (record.definition) {
-        const details = el('details'); details.append(el('summary', '查看参数'));
+        const details = el('details'); details.append(el('summary', '查看参数与文档依据'));
+        if (record.evidence) details.append(el('p', `路径依据：${record.evidence}`, 'hint'));
         for (const [name, schema] of Object.entries(record.definition.parameters?.properties || {})) {
-          details.append(el('p', `${name} · ${Array.isArray(schema.type) ? schema.type.join(' / ') : schema.type || '复合结构'}${record.definition.parameters.required?.includes(name) ? ' · 必填' : ' · 可选'}${Object.hasOwn(schema, 'default') ? ' · 有默认值' : ''}`, 'hint'));
+          details.append(el('p', `${name} · ${Array.isArray(schema.type) ? schema.type.join(' / ') : schema.type || '复合结构'}${record.definition.parameters.required?.includes(name) ? ' · 必填' : ' · 可选'}${Object.hasOwn(schema, 'default') ? ` · 默认值：${JSON.stringify(schema.default)}` : ''}`, 'hint'));
+          if (schema.description) details.append(el('p', schema.description, 'hint'));
         }
         if (!Object.keys(record.definition.parameters?.properties || {}).length) details.append(el('p', '无需模型填写参数', 'hint'));
         row.append(details);

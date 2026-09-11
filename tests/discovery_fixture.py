@@ -64,3 +64,52 @@ def spec():
             },
         },
     }
+
+
+TEXT = """Example reporting API
+GET https://api.example.test/report
+Set the query parameter api_key to your Report Key.
+start: required string, first UTC day, YYYY-MM-DD. Example 2023-03-25.
+limit: optional integer, default 20.
+"""
+
+
+def ordinary_spec():
+    return {
+        "openapi": "3.0.3",
+        "info": {"title": "Reports", "version": "1"},
+        "servers": [{"url": "https://api.example.test"}],
+        "security": [{"Key": []}],
+        "components": {
+            "securitySchemes": {
+                "Key": {
+                    "type": "apiKey",
+                    "in": "query",
+                    "name": "api_key",
+                    "x-evidence": "Set the query parameter api_key to your Report Key.",
+                }
+            }
+        },
+        "paths": {
+            "/report": {
+                "get": {
+                    "summary": "查询报表",
+                    "x-evidence": "GET https://api.example.test/report",
+                    "x-method-evidence": "GET https://api.example.test/report",
+                    "parameters": [
+                        {
+                            "in": "query",
+                            "name": "start",
+                            "required": True,
+                            "schema": {"type": "string", "description": "UTC 日期 YYYY-MM-DD"},
+                        },
+                        {
+                            "in": "query",
+                            "name": "limit",
+                            "schema": {"type": "integer", "default": 20},
+                        },
+                    ],
+                }
+            }
+        },
+    }

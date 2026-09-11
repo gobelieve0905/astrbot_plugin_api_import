@@ -265,6 +265,8 @@ def server_url(document, path_item, operation, document_url, target):
 def operation_definition(
     document, path, path_item, method, operation, document_url, target, api_key, override
 ):
+    if operation.get("x-import-warning"):
+        raise DiscoveryError(str(operation["x-import-warning"])[:800])
     base = server_url(document, path_item, operation, document_url, target)
     url = base.rstrip("/") + path
     if origin(url) != origin(target):
@@ -441,6 +443,8 @@ def operation_definition(
         "definition": definition,
         "supported": True,
         "reason": None,
+        "evidence": str(operation.get("x-evidence", ""))[:1000],
+        "notes": str(operation.get("x-import-notes", ""))[:1000],
     }
 
 
@@ -510,19 +514,20 @@ def convert_document(document, target, document_url="", api_key="", override=Non
 
 
 class Discovery:
-    def __init__(self, client=None):
+    def __init__(self, client=None, reader=None):
+        self.reader = reader
         self.client = client or httpx.AsyncClient(trust_env=False, follow_redirects=False)
 
     async def close(self):
         await self.client.aclose()
 
-    async def _fetch(self, url, method="GET"):
+    async def _fetch(self, url, method="GET", max_bytes=MAX_DOCUMENT, timeout=5):
         # Deliberately no API key, guessed authentication or redirects during discovery.
         try:
             async with self.client.stream(
                 method,
                 url,
-                timeout=5,
+                timeout=timeout,
                 headers={"Accept": "application/json, application/yaml, text/yaml, text/html"},
                 follow_redirects=False,
             ) as response:
@@ -533,7 +538,7 @@ class Discovery:
                 chunks, size = [], 0
                 async for chunk in response.aiter_bytes():
                     size += len(chunk)
-                    if size > MAX_DOCUMENT:
+                    if size > max_bytes:
                         return "", 413
                     chunks.append(chunk)
                 return b"".join(chunks).decode("utf-8-sig"), 200
@@ -555,45 +560,56 @@ class Discovery:
         manual_text = payload.get("document_text", "")
         if manual_url:
             validate_url(manual_url)
-        if manual_text:
-            document = document_from_text(manual_text)
+        from .document_import import interpret_document
+
+        inferred = False
+        if not isinstance(manual_text, str) or len(manual_text.encode()) > MAX_DOCUMENT:
+            raise DiscoveryError("文档内容超过 2 MB 或格式无效")
+        if api_key and (api_key in unquote(manual_url) or api_key in unquote(parts.path)):
+            raise DiscoveryError("文档地址请勿包含 API Key，Key 只需填写在专用输入框")
+        if manual_text or manual_url:
             source = manual_url or target
-        else:
-            if manual_url:
-                validate_url(manual_url)
-                candidates = [manual_url]
+            if manual_text:
+                raw = manual_text
             else:
-                root = urlunsplit((parts.scheme, parts.netloc, "/", "", ""))
-                prefix = without_query(target).rstrip("/") + "/"
-                candidates = []
-                if parts.path.endswith((".json", ".yaml", ".yml")) or parts.path.endswith(
-                    "/api-docs"
-                ):
-                    # Target is an API destination; use document_url when pointing to a spec itself.
-                    candidates.append(without_query(target))
-                candidates += [
-                    urljoin(prefix, "openapi.json"),
-                    urljoin(root, "openapi.json"),
-                    urljoin(root, "swagger.json"),
-                    urljoin(root, "v3/api-docs"),
-                    urljoin(root, "openapi.yaml"),
-                    urljoin(root, "swagger/v1/swagger.json"),
-                ]
-                candidates = list(dict.fromkeys(candidates))[:7]
+                raw, status = await self._fetch(manual_url, max_bytes=8_000_000, timeout=15)
+                if not raw:
+                    raise DiscoveryError(
+                        "文档网页无法读取（可能重定向、需登录或被拦截），请粘贴接口说明或请求示例"
+                    )
+            try:
+                document = document_from_text(raw)
+            except DiscoveryError:
+                # Broken structured specs remain errors, rather than inviting model guesses.
+                if re.search(r'(?:"openapi"|"swagger"|^openapi:|^swagger:)', raw[:1000], re.M):
+                    raise
+                document = await interpret_document(raw, target, api_key, self.reader)
+                inferred = True
+        else:
+            root = urlunsplit((parts.scheme, parts.netloc, "/", "", ""))
+            prefix = without_query(target).rstrip("/") + "/"
+            candidates = []
+            if parts.path.endswith((".json", ".yaml", ".yml", "/api-docs")):
+                candidates.append(without_query(target))
+            candidates += [
+                urljoin(prefix, "openapi.json"),
+                urljoin(root, "openapi.json"),
+                urljoin(root, "swagger.json"),
+                urljoin(root, "v3/api-docs"),
+                urljoin(root, "openapi.yaml"),
+                urljoin(root, "swagger/v1/swagger.json"),
+            ]
             document, source = None, ""
-            for url in candidates:
-                text, status = await self._fetch(url)
-                if not text:
+            for url in list(dict.fromkeys(candidates))[:7]:
+                raw, status = await self._fetch(url)
+                if not raw:
                     continue
                 try:
-                    document = document_from_text(text)
+                    document = document_from_text(raw)
                     source = url
                     break
                 except DiscoveryError:
-                    if manual_url:
-                        raise DiscoveryError(
-                            "该文档链接未返回可解析的 OpenAPI JSON/YAML，请填写规范文件地址或粘贴内容"
-                        ) from None
+                    continue
             if document is None:
                 allow, _ = await self._fetch(without_query(target), "OPTIONS")
                 methods = [m for m in METHODS if m in {v.strip().upper() for v in allow.split(",")}]
@@ -601,21 +617,30 @@ class Discovery:
                     "operations": [],
                     "methods": methods,
                     "source": None,
-                    "message": "未找到 OpenAPI 文档。仅凭 URL 和 Key 无法确定参数与鉴权方式；请补充 OpenAPI 文档链接或内容。Allow 中的方法仅表示服务器声明支持，不能验证 Key 权限。",
+                    "message": "未找到可自动读取的接口定义。请填写平台 API 文档网页，或粘贴接口说明、参数表、请求示例，不要求 OpenAPI 格式。服务端声明的方法不能验证 Key 权限。",
                 }
         operations = convert_document(document, target, source, api_key, override)
         return {
             "operations": operations,
             "methods": sorted({o["method"] for o in operations}),
             "source": without_query(source),
-            "message": "已根据文档生成操作。请选择允许 AstrBot 调用的操作；未勾选的操作会保存为停用。Key 的实际权限未验证。"
+            "inferred": inferred,
+            "message": (
+                "已由模型阅读普通文档生成草稿，请核对路径、请求方式及参数后选择允许调用的操作。未执行接口验证，Key 的实际权限未验证。"
+                if inferred
+                else "已根据文档生成操作。请选择允许 AstrBot 调用的操作；未勾选的操作会保存为停用。Key 的实际权限未验证。"
+            )
             if operations
             else "文档中没有匹配 Target URL 的操作，请确认服务根地址或具体接口路径。",
         }
 
     async def run(self, payload):
+        if not isinstance(payload, dict):
+            raise DiscoveryError("请求必须是 JSON 对象")
         try:
-            async with asyncio.timeout(25):
+            async with asyncio.timeout(
+                120 if payload.get("document_url") or payload.get("document_text") else 25
+            ):
                 return await self.discover(payload)
         except TimeoutError as exc:
-            raise DiscoveryError("自动发现超时，请补充 OpenAPI 文档链接后重试") from exc
+            raise DiscoveryError("识别超时，请粘贴相关接口段落后重试") from exc

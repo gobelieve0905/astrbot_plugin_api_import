@@ -47,7 +47,7 @@ class ApiImportPlugin(Star):
         self.closed = False
         self.catalog = Catalog(config, self._apply_saved)
         self.edit_lock = asyncio.Lock()
-        self.discovery = Discovery()
+        self.discovery = Discovery(reader=self._read_document)
         self.discovery_lock = asyncio.Lock()
         self.web_handlers = []
         for route, handler, methods in (
@@ -158,6 +158,16 @@ class ApiImportPlugin(Star):
     async def page_permissions(self):
         return await self._page_mutate("permissions")
 
+    async def _read_document(self, prompt, system_prompt):
+        provider = await self.context.get_using_provider_async()
+        if provider is None:
+            raise DiscoveryError("请先在 AstrBot 配置默认聊天模型，再识别普通文档")
+        async with asyncio.timeout(90):
+            result = await provider.text_chat(
+                prompt=prompt, system_prompt=system_prompt, contexts=[], func_tool=None
+            )
+        return result.completion_text
+
     async def page_discover(self):
         if self.closed:
             return error_response("插件已卸载，请刷新页面", status_code=503)
@@ -172,7 +182,7 @@ class ApiImportPlugin(Star):
             return error_response(str(exc))
         except Exception:
             logger.warning("API 文档解析失败；未执行目标业务操作")
-            return error_response("接口文档结构暂不能识别，请补充规范文档或使用手动接入")
+            return error_response("接口文档结构暂不能识别，请粘贴接口说明或使用手动接入")
 
     @filter.permission_type(filter.PermissionType.ADMIN)
     @filter.command("api_tools")
