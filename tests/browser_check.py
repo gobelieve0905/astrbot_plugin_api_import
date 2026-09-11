@@ -3,21 +3,19 @@
 Run separately with playwright installed, e.g. python -B tests/browser_check.py.
 """
 
-import asyncio
 import importlib
 import json
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
-from discovery_fixture import TEXT, ordinary_spec, spec
 from playwright.sync_api import sync_playwright
 from test_engine import Definitions, root
 
 Catalog = importlib.import_module("api_import_test.catalog").Catalog
 ConflictError = importlib.import_module("api_import_test.catalog").ConflictError
 import_curl = importlib.import_module("api_import_test.importing").import_curl
-DiscoveryModule = importlib.import_module("api_import_test.discovery")
+Platforms = importlib.import_module("api_import_test.platforms")
 config = {"tools_json": "[]"}
 
 
@@ -51,10 +49,8 @@ class Handler(BaseHTTPRequestHandler):
     def do_GET(self):
         if self.path == "/fixture/catalog":
             self.send(json.dumps(catalog.snapshot()).encode())
-        elif self.path == "/fixture/document-models":
-            self.send(
-                json.dumps({"models": [{"id": "fixture-model", "model": "fixture"}]}).encode()
-            )
+        elif self.path == "/fixture/platforms":
+            self.send(json.dumps(Platforms.platform_catalog()).encode())
         elif self.path in ("/", "/app.js", "/style.css"):
             filename = "index.html" if self.path == "/" else self.path[1:]
             content = (root / "pages/manage" / filename).read_text()
@@ -77,33 +73,6 @@ class Handler(BaseHTTPRequestHandler):
             action = self.path.split("/")[-1]
             if action == "import-curl":
                 result = {"definition": import_curl(body["text"])}
-            elif action == "discover":
-
-                async def discover():
-                    import httpx
-
-                    async def reader(prompt, system):
-                        assert "synthetic-key" not in prompt
-                        generated = ordinary_spec()
-                        generated["paths"]["/report"]["get"]["x-method-inferred"] = True
-                        return json.dumps(generated)
-
-                    def respond(req):
-                        if req.url.host == "docs.example.test":
-                            return httpx.Response(200, text="<main><pre>" + TEXT + "</pre></main>")
-                        if "/undocumented/" in req.url.path or req.url.path == "/undocumented":
-                            return httpx.Response(404)
-                        return httpx.Response(200, json=spec())
-
-                    engine = DiscoveryModule.Discovery(
-                        httpx.AsyncClient(transport=httpx.MockTransport(respond)), reader=reader
-                    )
-                    try:
-                        return await engine.run(body)
-                    finally:
-                        await engine.close()
-
-                result = asyncio.run(discover())
             else:
                 result = catalog.mutate(action, body)
             self.send(json.dumps(result).encode())
@@ -216,74 +185,46 @@ def run():
         page.locator("#cancel").click()
         page.locator("#confirm-yes").click()
         page.locator("#editor").wait_for(state="hidden")
-        # Default two-field automatic discovery, grouped opt-in methods, and runtime permission management.
+        # Presets require only the token and independent operation switches, including same-method operations.
         page.locator("#add").click()
-        assert page.locator("#panel-auto").is_visible()
-        page.locator("#auto-url").fill("https://api.example.test/v1")
-        page.locator("#auto-key").fill("synthetic-key")
-        page.locator("#discover").click()
-        page.locator("#discovered-operations .operation-row").nth(3).wait_for()
-        assert page.locator("#discovered-operations input:checked").count() == 0
-        page.locator("#discovered-operations .operation-group").filter(
-            has=page.locator(".section-head", has_text="GET（")
-        ).locator(".section-head input").check()
-        page.screenshot(path=str(output / "automatic-operations.png"))
+        assert page.locator("#panel-platform").is_visible()
+        assert page.locator("#tab-auto").count() == 0
+        page.locator("#platform-select").select_option("applovin_report")
+        assert page.locator("#platform-operations .operation-row").count() == 6
+        assert page.locator("#platform-operations input:checked").count() == 0
+        page.locator("#save").click()
+        assert page.locator("#editor-error").is_visible()
+        page.locator("#platform-token").fill("synthetic-key")
+        page.locator('[data-operation-id="advertiser"]').check()
+        page.locator('[data-operation-id="cohort_sessions"]').check()
+        page.evaluate("document.documentElement.dataset.theme='light'")
+        page.locator("#platform-token").dispatch_event("input")
+        page.locator("#editor .dialog-body").evaluate("node => node.scrollTop = 0")
+        page.screenshot(path=str(output / "platform-quick-light.png"), animations="disabled")
         before = len(catalog.snapshot()["items"])
         page.locator("#save").click()
+
         page.locator("#editor").wait_for(state="hidden")
         incoming = catalog.snapshot()["items"][before:]
-        assert len(incoming) == 4
-        assert all(item["enabled"] == (item["request"]["method"] == "GET") for item in incoming)
-        page.locator("#method-filter").select_option("POST")
-        assert all(
-            card.locator(".method").inner_text() == "POST" for card in page.locator(".card").all()
-        )
+        assert len(incoming) == 6 and sum(item["enabled"] for item in incoming) == 2
+        assert page.locator("#platform-token").input_value() == ""
+        page.locator("#method-filter").select_option("PATCH")
+        assert page.locator(".card").count() == 1
         page.locator("#method-filter").select_option("")
         page.locator("#permissions").click()
-        group = page.locator("#permission-groups .operation-group").filter(
-            has=page.locator(".section-head", has_text="https://api.example.test · GET")
-        )
-        group.locator(".section-head input").uncheck()
-        page.screenshot(path=str(output / "permissions.png"))
+        advertiser = incoming[0]["name"]
+        page.locator(f'[data-operation-name="{advertiser}"]').uncheck()
         page.locator("#save-permissions").click()
         page.locator("#permissions-dialog").wait_for(state="hidden")
-        assert all(not item["enabled"] for item in catalog.snapshot()["items"][before:])
-        # Changing a key invalidates cached discovery definitions.
+        assert sum(item["enabled"] for item in catalog.snapshot()["items"][before:]) == 1
+        assert catalog.snapshot()["items"][-1]["enabled"]
+        # Additional accounts do not collide, and all-off onboarding remains possible.
         page.locator("#add").click()
-        page.locator("#auto-url").fill("https://api.example.test/v1")
-        page.locator("#auto-key").fill("synthetic-key")
-        page.locator("#discover").click()
-        page.locator("#discovered-operations .operation-row").nth(3).wait_for()
-        page.locator("#auto-key").fill("changed-key")
-        assert page.locator("#save").is_disabled()
-        assert page.locator("#discovered-operations .operation-row").count() == 0
-        page.locator("#cancel").click()
-        page.locator("#confirm-yes").click()
-        page.locator("#editor").wait_for(state="hidden")
-        # Ordinary platform webpage is a primary field, with source evidence in a disabled draft.
-        page.locator("#add").click()
-        assert page.locator("#auto-doc-url").is_visible()
-        page.locator("#auto-url").fill("https://api.example.test")
-        page.locator("#auto-key").fill("synthetic-key")
-        page.locator("#auto-doc-url").fill("https://docs.example.test/reporting-guide")
-        page.locator("#auto-more summary").click()
-        page.locator("#auto-model").select_option("fixture-model")
-        page.locator("#discover").click()
-        page.locator("#discovered-operations .operation-row").wait_for()
-        assert "模型" in page.locator("#discovery-message").inner_text()
-        assert "推断，请确认" in page.locator("#discovered-operations").inner_text()
-        assert page.locator("#discovered-operations input:checked").count() == 0
-        page.locator("#discovered-operations summary").click()
-        assert (
-            "GET https://api.example.test/report"
-            in page.locator("#discovered-operations").inner_text()
-        )
-        assert "UTC 日期" in page.locator("#discovered-operations").inner_text()
-        page.screenshot(path=str(output / "ordinary-document.png"))
+        page.locator("#platform-token").fill("second-synthetic-key")
         page.locator("#save").click()
         page.locator("#editor").wait_for(state="hidden")
-        assert catalog.snapshot()["items"][-1]["request"]["query"]["api_key"] == "synthetic-key"
-        assert not catalog.snapshot()["items"][-1]["enabled"]
+        assert len(catalog.snapshot()["items"]) == before + 12
+        assert not any(item["enabled"] for item in catalog.snapshot()["items"][-6:])
         # Narrow screen layout, modal and body do not overflow horizontally.
         page.set_viewport_size({"width": 390, "height": 844})
         assert page.evaluate("document.documentElement.scrollWidth <= innerWidth")
@@ -297,7 +238,7 @@ def run():
         browser.close()
     server.shutdown()
     print(
-        "Browser checks passed: form, JSON, cURL, edit, toggle, delete, search, duplicate, constraints, themes, mobile"
+        "Browser checks passed: platform token onboarding, independent permissions, multiple accounts, form, JSON, cURL, CRUD, themes, mobile"
     )
 
 

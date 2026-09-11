@@ -3,7 +3,7 @@
 <head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>API 管理</title><link rel="stylesheet" href="./style.css"></head>
 <body>
 <main>
-  <header><div><p class="eyebrow">API TOOLBOX <span>0.0.1</span></p><h1>API 管理</h1><p class="muted">将你的接口，变成对话中可用的工具。</p></div><button class="primary" id="add">＋ 新增 API</button></header>
+  <header><div><p class="eyebrow">API TOOLBOX <span>0.1.1</span></p><h1>API 管理</h1><p class="muted">将你的接口，变成对话中可用的工具。</p></div><button class="primary" id="add">＋ 新增 API</button></header>
   <div id="notice" class="notice" role="status" aria-live="polite" hidden></div>
   <section class="toolbar"><label class="search"><span>搜索</span><input id="search" type="search" placeholder="名称、用途或请求地址" aria-label="搜索 API"></label><span id="count" class="muted"></span><select id="method-filter" aria-label="按请求方法筛选"><option value="">全部方法</option><option>GET</option><option>POST</option><option>PUT</option><option>PATCH</option><option>DELETE</option><option>HEAD</option><option>OPTIONS</option></select><button id="permissions">调用权限</button><button id="refresh">刷新列表</button></section>
   <section id="list" aria-label="API 列表"><p class="muted">正在连接 AstrBot…</p></section>
@@ -11,23 +11,15 @@
 </main>
 <dialog id="editor" aria-labelledby="editor-title">
  <div class="dialog-head"><div><p class="eyebrow">接口定义</p><h2 id="editor-title">新增 API</h2></div><button id="close-editor" aria-label="关闭编辑器">✕</button></div>
- <div class="tabs" role="tablist" aria-label="填写方式"><button id="tab-auto" data-mode="auto" role="tab" aria-selected="false">自动接入</button><button id="tab-form" data-mode="form" role="tab" aria-selected="true">可视化表单</button><button id="tab-curl" data-mode="curl" role="tab" aria-selected="false">粘贴 cURL</button><button id="tab-json" data-mode="json" role="tab" aria-selected="false">JSON 编辑</button></div>
+ <div class="tabs" role="tablist" aria-label="填写方式"><button id="tab-platform" data-mode="platform" role="tab" aria-selected="false">平台快速接入</button><button id="tab-form" data-mode="form" role="tab" aria-selected="true">可视化表单</button><button id="tab-curl" data-mode="curl" role="tab" aria-selected="false">粘贴 cURL</button><button id="tab-json" data-mode="json" role="tab" aria-selected="false">JSON 编辑</button></div>
  <div id="editor-error" class="notice error" role="alert" hidden></div>
  <div class="dialog-body">
-  <section id="panel-auto" role="tabpanel" hidden>
-   <h3>填写 URL 与 API Key</h3><p class="muted">从接口文档自动识别参数和可用操作，再选择允许调用的范围。</p>
-   <label>Target URL<input id="auto-url" type="url" placeholder="https://api.example.com 或具体接口地址"></label>
-   <label>API Key / Token<input id="auto-key" type="password" autocomplete="off" placeholder="填写你的 Key；公开接口可留空"></label>
-   <label>API 文档网页（可选）<input id="auto-doc-url" type="url" placeholder="粘贴平台的 API 说明页面链接，无需 OpenAPI 格式"></label>
-   <details class="form-section" id="auto-more"><summary>粘贴文档 / 手动指定 Key 位置</summary>
-    <label>文档解析模型<select id="auto-model"><option value="">跟随 AstrBot 默认模型</option></select></label>
-    <p class="hint">只影响本页文档识别，不修改聊天模型设置。</p>
-    <label>接口说明或请求示例<textarea id="auto-doc-text" rows="5" spellcheck="false" placeholder="粘贴文档正文、参数表、cURL 示例、Markdown 或 JSON/YAML 接口定义"></textarea></label>
-    <div class="grid"><label>Key 传递方式<select id="auto-auth"><option value="auto">根据文档识别</option><option value="bearer">Authorization: Bearer</option><option value="header">自定义 Header</option><option value="query">Query 参数</option><option value="none">不附加 Key</option></select></label><label id="auto-auth-name-label" hidden>Key 字段名称<input id="auto-auth-name" placeholder="例如 X-API-Key 或 api_key"></label></div>
-   </details>
-   <button id="discover" class="primary">识别可用操作</button>
-   <p class="hint">普通文档会交给所选 AstrBot 模型生成草稿，API Key 不发送给解析模型；请核对结果后开启操作。识别不会调用业务接口。</p>
-   <div id="discovery-message" class="notice" role="status" hidden></div><div id="discovered-operations"></div>
+  <section id="panel-platform" role="tabpanel" hidden>
+   <h3>选择平台，填写 Token</h3><p class="muted">接口地址和请求参数已预设，选择允许调用的操作即可接入。</p>
+   <label>平台<select id="platform-select"><option value="">正在加载平台…</option></select></label>
+   <p id="platform-description" class="hint"></p>
+   <label><span id="platform-token-label">Token</span><input id="platform-token" type="password" autocomplete="off" placeholder="填写平台 Report Key" required></label>
+   <div class="form-section"><h3>允许调用的操作</h3><p class="hint">默认全部关闭，可逐项开启；保存后也可在「调用权限」中调整。</p><div id="platform-operations"></div></div>
   </section>
   <section id="panel-curl" role="tabpanel" hidden><h3>从请求示例开始</h3><p class="muted">粘贴一条 cURL，解析为草稿后继续填写用途和参数。解析不会执行请求。</p><label>cURL 命令<textarea id="curl-text" rows="10" spellcheck="false" placeholder="curl 'https://api.example.com/items?limit=20'"></textarea></label><button id="parse-curl" class="primary">解析为表单草稿</button><p class="hint">支持 URL、请求方法、Header、JSON 与表单。不执行 shell，不读取本地文件；暂不支持的选项会明确提示。</p></section>
   <section id="panel-json" role="tabpanel" hidden><p class="muted">填写单个接口定义对象。适合复制现有配置，或编辑复杂 JSON Schema。</p><label>接口 JSON<textarea id="json-text" rows="22" spellcheck="false"></textarea></label></section>

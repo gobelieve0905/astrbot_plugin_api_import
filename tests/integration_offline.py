@@ -142,110 +142,40 @@ async def main():
     )
     assert deleted.status_code == 200 and manager.func_list == [foreign]
     assert json.loads(Path(config_path).read_text(encoding="utf-8-sig"))["tools_json"] == "[]"
-    from discovery_fixture import spec
-
-    await plugin.discovery.client.aclose()
-    discovery_requests = []
-
-    def document_response(req):
-        discovery_requests.append(req)
-        return httpx.Response(200, json=spec())
-
-    plugin.discovery.client = httpx.AsyncClient(transport=httpx.MockTransport(document_response))
-    discovered = await web_call(
-        plugin.page_discover,
-        {"target_url": "https://api.example.test/v1", "api_key": "synthetic-key"},
+    platforms = await plugin.page_platforms()
+    assert len(json.loads(platforms.body)["platforms"][0]["operations"]) == 6
+    assert not any(
+        "discover" in route[0] or "document-models" in route[0]
+        for route in context.registered_web_apis
     )
-    assert discovered.status_code == 200
-    operations = json.loads(discovered.body)["operations"]
-    assert len(operations) == 4 and all(item["supported"] for item in operations)
-    assert all("synthetic-key" not in str(req.url) + str(req.headers) for req in discovery_requests)
-    incoming = [dict(item["definition"], enabled=item["method"] == "GET") for item in operations]
-    batch = await web_call(
-        plugin.page_batch,
-        {"revision": plugin.catalog.snapshot()["revision"], "definitions": incoming},
+    connected = await web_call(
+        plugin.page_connect_platform,
+        {
+            "revision": plugin.catalog.snapshot()["revision"],
+            "platform_id": "applovin_report",
+            "token": "synthetic-key",
+            "enabled_operations": ["advertiser", "cohort_sessions"],
+        },
     )
-    assert batch.status_code == 200 and len(plugin.tools) == 2
-    assert all(item.definition.request["method"] == "GET" for item in plugin.tools)
+    assert connected.status_code == 200 and len(plugin.tools) == 2
+    assert all(
+        "synthetic-key" not in json.dumps(tool.parameters) + tool.description
+        for tool in plugin.tools
+    )
     cached = plugin.tools[0]
     permissions = await web_call(
         plugin.page_permissions,
-        {"revision": plugin.catalog.snapshot()["revision"], "enabled_names": []},
+        {
+            "revision": plugin.catalog.snapshot()["revision"],
+            "enabled_names": [plugin.tools[1].definition.name],
+        },
     )
-    assert permissions.status_code == 200 and manager.func_list == [foreign]
+    assert permissions.status_code == 200 and len(plugin.tools) == 1
+    assert "cohort_sessions" in plugin.tools[0].name
     assert not json.loads(await cached.call(None))["ok"]
     restored = AstrBotConfig(config_path=config_path, default_config={"tools_json": "[]"})
-    assert len(json.loads(restored["tools_json"])) == 4
-    assert all(not item["enabled"] for item in json.loads(restored["tools_json"]))
-    # Ordinary documents use a provider with no tools, chat history or API credential.
-    from unittest.mock import AsyncMock, Mock
-
-    from discovery_fixture import TEXT, ordinary_spec
-
-    model_call = AsyncMock(
-        return_value=types.SimpleNamespace(completion_text=json.dumps(ordinary_spec()))
-    )
-    model = types.SimpleNamespace(text_chat=model_call)
-    with patch.object(context, "get_using_provider_async", AsyncMock(return_value=model)):
-        ordinary = await web_call(
-            plugin.page_discover,
-            {
-                "target_url": "https://api.example.test",
-                "api_key": "private-test-key",
-                "document_text": TEXT,
-            },
-        )
-    assert ordinary.status_code == 200
-    result = json.loads(ordinary.body)
-    assert result["inferred"] and result["operations"][0]["supported"]
-    kwargs = model_call.call_args.kwargs
-    assert kwargs["contexts"] == [] and kwargs["func_tool"] is None
-    assert "private-test-key" not in json.dumps(kwargs)
-    assert not result["operations"][0]["definition"]["enabled"]
-    assert len(plugin.catalog.snapshot()["items"]) == 4  # Discovery never saves.
-    with patch.object(context, "get_using_provider_async", AsyncMock(return_value=None)):
-        unavailable = await web_call(
-            plugin.page_discover,
-            {
-                "target_url": "https://api.example.test",
-                "document_text": TEXT,
-            },
-        )
-    assert unavailable.status_code == 400
-    with (
-        patch.object(
-            context,
-            "get_using_provider_async",
-            AsyncMock(side_effect=AssertionError("must use selected model")),
-        ),
-        patch.object(context, "get_provider_by_id", Mock(return_value=model)) as selected,
-    ):
-        explicit = await web_call(
-            plugin.page_discover,
-            {
-                "target_url": "https://api.example.test",
-                "document_text": TEXT,
-                "api_key": "private-test-key",
-                "document_provider_id": "selected-model",
-            },
-        )
-    assert explicit.status_code == 200
-    selected.assert_called_once_with("selected-model")
-    model.meta = lambda: types.SimpleNamespace(id="selected-model", model="fixture")
-    with patch.object(context, "get_all_providers", Mock(return_value=[model])):
-        models = await plugin.page_document_models()
-    assert json.loads(models.body)["models"] == [{"id": "selected-model", "model": "fixture"}]
-    model.text_chat = AsyncMock(side_effect=RuntimeError("private-upstream-detail"))
-    with patch.object(context, "get_using_provider_async", AsyncMock(return_value=model)):
-        failed_model = await web_call(
-            plugin.page_discover,
-            {
-                "target_url": "https://api.example.test",
-                "document_text": TEXT,
-            },
-        )
-    assert failed_model.status_code == 400
-    assert b"private-upstream-detail" not in failed_model.body
+    assert len(json.loads(restored["tools_json"])) == 6
+    assert sum(item["enabled"] for item in json.loads(restored["tools_json"])) == 1
     await plugin.terminate()
     assert manager.func_list == [foreign]
     assert not context.registered_web_apis

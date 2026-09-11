@@ -5,6 +5,7 @@ import hashlib
 import json
 
 from .definitions import DefinitionError, parse_definitions
+from .platforms import build_connection
 
 
 class ConflictError(DefinitionError):
@@ -46,10 +47,12 @@ class Catalog:
                 if index is None:
                     raise ConflictError("该接口已不存在，请刷新列表")
                 items[index] = value
+        elif action == "connect-platform":
+            items.extend(build_connection(payload, items))
         elif action == "batch":
             incoming = payload.get("definitions")
             if not isinstance(incoming, list) or not incoming or len(incoming) > 200:
-                raise DefinitionError("请提供 1–200 个已识别的操作")
+                raise DefinitionError("请提供 1–200 个接口操作")
             items.extend(incoming)
         elif action == "permissions":
             selections = payload.get("enabled_names")

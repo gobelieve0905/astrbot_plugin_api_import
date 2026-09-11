@@ -4,8 +4,7 @@ const bridge = window.AstrBotPluginPage;
 let state = { items: [], revision: null };
 let draft = {}, originalName = null, editRevision = null, mode = 'form', dirty = false, busy = false;
 let confirmResolve = null;
-let automaticResult = null, permissionRevision = null;
-const httpMethods = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'HEAD', 'OPTIONS'];
+let platforms = [], permissionRevision = null;
 const blank = () => ({ name: '', description: '', enabled: false, parameters: { type: 'object', properties: {} }, request: { method: 'GET', url: '' } });
 const own = (object, key) => Object.hasOwn(object, key);
 const object = (value) => value !== null && typeof value === 'object' && !Array.isArray(value);
@@ -51,7 +50,7 @@ function renderList() {
   $('count').textContent = `${state.items.length} 个 API · ${state.items.filter((item) => item.enabled !== false).length} 个启用`;
   if (!items.length) {
     const empty = el('div', undefined, 'empty');
-    empty.append(el('div', '{ }', 'symbol'), el('h2', term ? '没有匹配的 API' : '接入你的第一个 API'), el('p', term ? '试试其他名称或地址。' : '输入 URL 和 API Key，自动识别可用操作。', 'muted'));
+    empty.append(el('div', '{ }', 'symbol'), el('h2', term ? '没有匹配的 API' : '接入你的第一个 API'), el('p', term ? '试试其他名称或地址。' : '选择平台并填写 Token，或手动添加接口。', 'muted'));
     if (!term) { const add = el('button', '＋ 新增 API', 'primary'); add.onclick = () => openEditor(); empty.append(add); }
     list.append(empty); return;
   }
@@ -198,9 +197,9 @@ function readJSON() { let value; try { value = JSON.parse($('json-text').value);
 function bodyVisibility() { const kind = $('body-kind').value; $('body-fields').hidden = !['json', 'form'].includes(kind); $('body-raw-label').hidden = kind !== 'raw'; }
 function displayMode(next) {
   mode = next;
-  for (const key of ['auto', 'form', 'curl', 'json']) { $(`panel-${key}`).hidden = key !== next; $(`tab-${key}`).setAttribute('aria-selected', String(key === next)); }
-  $('save').disabled = next === 'curl' || (next === 'auto' && !automaticResult?.operations.some((item) => item.supported && !state.items.some((known) => known.name === item.definition.name)));
-  $('save').textContent = next === 'auto' ? '保存操作与权限' : '保存并生效';
+  for (const key of ['platform', 'form', 'curl', 'json']) { $(`panel-${key}`).hidden = key !== next; $(`tab-${key}`).setAttribute('aria-selected', String(key === next)); }
+  $('save').disabled = next === 'curl' || (next === 'platform' && !platforms.some((item) => item.id === $('platform-select').value));
+  $('save').textContent = next === 'platform' ? '保存接入与权限' : '保存并生效';
 }
 function switchMode(next) {
   if (mode === next) return;
@@ -214,10 +213,11 @@ function switchMode(next) {
 }
 function openEditor(item) {
   originalName = item?.name ?? null; editRevision = state.revision; draft = clone(item || blank()); dirty = false;
+  $('tab-platform').hidden = !!item;
   $('editor-title').textContent = item ? '编辑 API' : '新增 API'; $('curl-text').value = ''; notice('', false, true);
   $('json-text').value = JSON.stringify(draft, null, 2);
-  resetAutomatic();
-  try { renderForm(); displayMode(item ? 'form' : 'auto'); }
+  resetPlatform();
+  try { renderForm(); displayMode(item ? 'form' : 'platform'); }
   catch (error) { displayMode('json'); notice(error.message, false, true); }
   $('editor').showModal();
 }
@@ -225,7 +225,7 @@ async function closeEditor() {
   if (busy) return;
   if (dirty && !await confirmAction('放弃修改？', '尚未保存的草稿将被丢弃。', '放弃修改')) return;
   $('editor').close();
-  resetAutomatic();
+  resetPlatform();
 }
 function lockEditor(locked) {
   for (const control of $('editor').querySelectorAll('button,input,select,textarea')) {
@@ -236,7 +236,7 @@ function lockEditor(locked) {
 }
 async function save() {
   if (busy) return;
-  if (mode === 'auto') return saveAutomatic();
+  if (mode === 'platform') return savePlatform();
   try {
     const definition = mode === 'form' ? readForm() : readJSON();
     if (!definition.name || !definition.description || !definition.request?.url) throw new Error('请填写工具名称、用途说明和请求地址');
@@ -273,20 +273,46 @@ $('parse-curl').onclick = async () => {
   catch (error) { notice(error.message, true, true); }
   finally { $('parse-curl').disabled = false; }
 };
-function resetAutomatic() {
-  automaticResult = null;
-  for (const id of ['auto-url', 'auto-key', 'auto-doc-url', 'auto-doc-text', 'auto-auth-name']) $(id).value = '';
-  $('auto-auth').value = 'auto'; $('auto-more').open = false;
-  $('auto-auth-name-label').hidden = true;
-  $('discovered-operations').replaceChildren(); $('discovery-message').hidden = true;
+function resetPlatform() {
+  $('platform-token').value = '';
+  renderPlatform();
 }
-function operationGroups(container, records, permissionMode = false) {
+function renderPlatform() {
+  const platform = platforms.find((item) => item.id === $('platform-select').value);
+  $('platform-description').textContent = platform?.description || '平台列表尚未就绪，请刷新页面重试，或使用手动填写方式。';
+  $('platform-token-label').textContent = platform?.token_label || 'Token';
+  $('platform-operations').replaceChildren();
+  for (const operation of platform?.operations || []) {
+    const row = el('div', undefined, 'operation-row');
+    const control = checkbox(false); control.dataset.operationId = operation.id;
+    const title = el('label', operation.title, 'check'); title.prepend(control);
+    const detail = el('details'); detail.append(el('summary', '查看接口与默认字段'), el('p', `${operation.method} ${operation.path}`, 'hint'), el('p', operation.description, 'hint'));
+    const link = el('a', '官方文档'); link.href = operation.documentation; link.target = '_blank'; link.rel = 'noopener noreferrer'; detail.append(link);
+    row.append(title, el('span', operation.method, 'method'), detail); $('platform-operations').append(row);
+  }
+}
+$('platform-token').oninput = () => notice('', false, true);
+$('platform-select').onchange = () => { $('platform-token').value = ''; renderPlatform(); displayMode(mode); };
+async function savePlatform() {
+  notice('', false, true);
+  const token = $('platform-token').value;
+  if (!token.trim()) { notice('请填写 Report Key / Token', true, true); return; }
+  const enabled_operations = [...$('platform-operations').querySelectorAll('input:checked')].map((control) => control.dataset.operationId);
+  lockEditor(true);
+  try {
+    await mutate('connect-platform', { revision: editRevision, platform_id: $('platform-select').value, token, enabled_operations });
+    dirty = false; $('editor').close(); resetPlatform();
+    notice(`平台已接入，已开启 ${enabled_operations.length} 个操作。可在「调用权限」中随时调整。`);
+  } catch (error) { notice(error.message, true, true); }
+  finally { lockEditor(false); }
+}
+function operationGroups(container, records) {
   container.replaceChildren();
   const groups = new Map();
   for (const record of records) {
     const url = record.definition?.request.url || '';
-    let service = '识别结果';
-    if (permissionMode) { try { service = new URL(url).origin; } catch { service = '其他接口'; } }
+    let service;
+    try { service = new URL(url).origin; } catch { service = '其他接口'; }
     const key = service + ' ' + record.method;
     if (!groups.has(key)) groups.set(key, { service, method: record.method, records: [] });
     groups.get(key).records.push(record);
@@ -295,23 +321,17 @@ function operationGroups(container, records, permissionMode = false) {
     const section = el('section', undefined, 'operation-group');
     const header = el('div', undefined, 'section-head');
     const all = checkbox(false);
-    const label = labeled(`${permissionMode ? group.service + ' · ' : ''}${group.method}（${group.records.length} 个操作）`, all);
+    const label = labeled(`${group.service} · ${group.method}（${group.records.length} 个操作）`, all);
     label.className = 'check'; header.append(label); section.append(header);
     const checkboxes = [];
     for (const record of group.records) {
       const row = el('div', undefined, 'operation-row');
-      const control = checkbox(permissionMode ? record.definition.enabled !== false : false);
-      const duplicate = !permissionMode && record.supported && state.items.some((item) => item.name === record.definition.name);
-      control.disabled = !record.supported || duplicate;
+      const control = checkbox(record.definition.enabled !== false);
       control.dataset.operationName = record.definition?.name || '';
-      const title = labeled(`${record.method} ${record.path}${record.needs_confirmation ? "（推断，请确认）" : ""}`, control); title.className = 'check';
+      const title = labeled(`${record.definition.name} · ${record.method} ${record.path}`, control); title.className = 'check';
       row.append(title, el('p', record.description || '', 'muted'));
-      if (record.notes) row.append(el('p', `文档解析说明：${record.notes}`, 'muted'));
-      if (record.auth) row.append(el('small', `Key 方式：${record.auth}；实际权限未验证`));
-      if (record.reason || duplicate) row.append(el('small', duplicate ? '已接入，请在调用权限中调整开关。' : record.reason, 'operation-warning'));
       if (record.definition) {
-        const details = el('details'); details.append(el('summary', '查看参数与文档依据'));
-        if (record.evidence) details.append(el('p', `路径依据：${record.evidence}`, 'hint'));
+        const details = el('details'); details.append(el('summary', '查看调用参数'));
         for (const [name, schema] of Object.entries(record.definition.parameters?.properties || {})) {
           details.append(el('p', `${name} · ${Array.isArray(schema.type) ? schema.type.join(' / ') : schema.type || '复合结构'}${record.definition.parameters.required?.includes(name) ? ' · 必填' : ' · 可选'}${Object.hasOwn(schema, 'default') ? ` · 默认值：${JSON.stringify(schema.default)}` : ''}`, 'hint'));
           if (schema.description) details.append(el('p', schema.description, 'hint'));
@@ -328,43 +348,9 @@ function operationGroups(container, records, permissionMode = false) {
     sync(); container.append(section);
   }
 }
-$('auto-auth').onchange = () => { $('auto-auth-name-label').hidden = !['header', 'query'].includes($('auto-auth').value); };
-// Editing connection details invalidates the old discovery so a different key/URL cannot be saved by mistake.
-for (const id of ['auto-url', 'auto-key', 'auto-doc-url', 'auto-doc-text', 'auto-auth', 'auto-auth-name', 'auto-model']) {
-  $(id).addEventListener('input', () => { automaticResult = null; $('discovered-operations').replaceChildren(); $('discovery-message').hidden = true; if (mode === 'auto') $('save').disabled = true; });
-}
-$('discover').onclick = async () => {
-  if (busy) return;
-  automaticResult = null;
-  $('discovered-operations').replaceChildren(); notice('', false, true);
-  $('discovery-message').hidden = false; $('discovery-message').textContent = '正在读取文档并识别操作；普通文档的模型解析可能需要 1–3 分钟…';
-  busy = true; lockEditor(true);
-  try {
-    const result = await bridge.apiPost('discover', { target_url: $('auto-url').value.trim(), api_key: $('auto-key').value, document_url: $('auto-doc-url').value.trim(), document_text: $('auto-doc-text').value, document_provider_id: $('auto-model').value, auth: { mode: $('auto-auth').value, name: $('auto-auth-name').value.trim() } });
-    automaticResult = result;
-    $('discovery-message').textContent = result.message + (result.source ? `\n文档来源：${result.source}` : '') + (!result.operations.length && result.methods.length ? `\n服务端声明的方法：${result.methods.join('、')}` : '');
-    operationGroups($('discovered-operations'), result.operations);
-    if (!result.operations.some((item) => item.supported)) $('auto-more').open = true;
-    dirty = true;
-  } catch (error) { $('discovery-message').textContent = error.message; $('auto-more').open = true; }
-  finally { busy = false; lockEditor(false); displayMode('auto'); }
-};
-async function saveAutomatic() {
-  if (!automaticResult) return;
-  const enabled = new Set([...$('discovered-operations').querySelectorAll('input[data-operation-name]:checked')].map((input) => input.dataset.operationName));
-  const definitions = automaticResult.operations.filter((item) => item.supported && !state.items.some((known) => known.name === item.definition.name)).map((item) => ({ ...clone(item.definition), enabled: enabled.has(item.definition.name) }));
-  if (!definitions.length) return;
-  lockEditor(true);
-  try {
-    await mutate('batch', { revision: editRevision, definitions });
-    dirty = false; $('editor').close(); resetAutomatic();
-    notice(`已接入 ${definitions.length} 个操作，允许调用 ${definitions.filter((item) => item.enabled).length} 个。可在「调用权限」中随时调整。`);
-  } catch (error) { notice(error.message, true, true); }
-  finally { lockEditor(false); }
-}
 $('permissions').onclick = () => {
   permissionRevision = state.revision; $('permissions-error').hidden = true;
-  operationGroups($('permission-groups'), state.items.map((item) => ({ method: item.request.method, path: item.request.url, description: item.description, definition: item, supported: true })), true);
+  operationGroups($('permission-groups'), state.items.map((item) => ({ method: item.request.method, path: item.request.url, description: item.description, definition: item, supported: true })));
   if (!state.items.length) $('permission-groups').append(el('p', '尚未接入任何操作。请先新增 API。', 'muted'));
   $('permissions-dialog').showModal();
 };
@@ -379,15 +365,18 @@ $('save-permissions').onclick = async () => {
   catch (error) { $('permissions-error').textContent = error.message; $('permissions-error').hidden = false; }
   finally { controls.forEach((control, index) => { control.disabled = previous[index]; }); }
 };
-async function loadDocumentModels() {
+async function loadPlatforms() {
   try {
-    const result = await bridge.apiGet('document-models');
-    for (const model of result.models || []) {
-      const option = el('option', model.id); option.value = model.id; $('auto-model').append(option);
-    }
-  } catch { /* Default model remains available when listing is temporarily unavailable. */ }
+    const result = await bridge.apiGet('platforms');
+    platforms = result.platforms || [];
+    $('platform-select').replaceChildren();
+    for (const platform of platforms) { const option = el('option', platform.name); option.value = platform.id; $('platform-select').append(option); }
+    renderPlatform();
+    if (mode === 'platform') displayMode(mode);
+  } catch { notice('平台列表加载失败，请刷新重试；仍可使用表单、cURL 或 JSON。', true); }
 }
+
 try {
   if (!bridge) throw new Error('请从 AstrBot 插件详情中的「API 管理」打开此页面。');
-  await bridge.ready(); await refresh(); void loadDocumentModels();
+  await bridge.ready(); await refresh(); void loadPlatforms();
 } catch (error) { notice(error.message, true); $('list').replaceChildren(); $('add').disabled = true; }
