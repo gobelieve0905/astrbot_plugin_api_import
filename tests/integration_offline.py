@@ -178,7 +178,7 @@ async def main():
     assert len(json.loads(restored["tools_json"])) == 4
     assert all(not item["enabled"] for item in json.loads(restored["tools_json"]))
     # Ordinary documents use a provider with no tools, chat history or API credential.
-    from unittest.mock import AsyncMock
+    from unittest.mock import AsyncMock, Mock
 
     from discovery_fixture import TEXT, ordinary_spec
 
@@ -212,6 +212,29 @@ async def main():
             },
         )
     assert unavailable.status_code == 400
+    with (
+        patch.object(
+            context,
+            "get_using_provider_async",
+            AsyncMock(side_effect=AssertionError("must use selected model")),
+        ),
+        patch.object(context, "get_provider_by_id", Mock(return_value=model)) as selected,
+    ):
+        explicit = await web_call(
+            plugin.page_discover,
+            {
+                "target_url": "https://api.example.test",
+                "document_text": TEXT,
+                "api_key": "private-test-key",
+                "document_provider_id": "selected-model",
+            },
+        )
+    assert explicit.status_code == 200
+    selected.assert_called_once_with("selected-model")
+    model.meta = lambda: types.SimpleNamespace(id="selected-model", model="fixture")
+    with patch.object(context, "get_all_providers", Mock(return_value=[model])):
+        models = await plugin.page_document_models()
+    assert json.loads(models.body)["models"] == [{"id": "selected-model", "model": "fixture"}]
     model.text_chat = AsyncMock(side_effect=RuntimeError("private-upstream-detail"))
     with patch.object(context, "get_using_provider_async", AsyncMock(return_value=model)):
         failed_model = await web_call(

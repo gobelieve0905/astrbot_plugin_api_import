@@ -51,6 +51,10 @@ class Handler(BaseHTTPRequestHandler):
     def do_GET(self):
         if self.path == "/fixture/catalog":
             self.send(json.dumps(catalog.snapshot()).encode())
+        elif self.path == "/fixture/document-models":
+            self.send(
+                json.dumps({"models": [{"id": "fixture-model", "model": "fixture"}]}).encode()
+            )
         elif self.path in ("/", "/app.js", "/style.css"):
             filename = "index.html" if self.path == "/" else self.path[1:]
             content = (root / "pages/manage" / filename).read_text()
@@ -260,6 +264,8 @@ def run():
         page.locator("#auto-url").fill("https://api.example.test")
         page.locator("#auto-key").fill("synthetic-key")
         page.locator("#auto-doc-url").fill("https://docs.example.test/reporting-guide")
+        page.locator("#auto-more summary").click()
+        page.locator("#auto-model").select_option("fixture-model")
         page.locator("#discover").click()
         page.locator("#discovered-operations .operation-row").wait_for()
         assert "模型" in page.locator("#discovery-message").inner_text()

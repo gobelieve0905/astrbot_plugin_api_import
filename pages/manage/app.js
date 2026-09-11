@@ -330,7 +330,7 @@ function operationGroups(container, records, permissionMode = false) {
 }
 $('auto-auth').onchange = () => { $('auto-auth-name-label').hidden = !['header', 'query'].includes($('auto-auth').value); };
 // Editing connection details invalidates the old discovery so a different key/URL cannot be saved by mistake.
-for (const id of ['auto-url', 'auto-key', 'auto-doc-url', 'auto-doc-text', 'auto-auth', 'auto-auth-name']) {
+for (const id of ['auto-url', 'auto-key', 'auto-doc-url', 'auto-doc-text', 'auto-auth', 'auto-auth-name', 'auto-model']) {
   $(id).addEventListener('input', () => { automaticResult = null; $('discovered-operations').replaceChildren(); $('discovery-message').hidden = true; if (mode === 'auto') $('save').disabled = true; });
 }
 $('discover').onclick = async () => {
@@ -340,7 +340,7 @@ $('discover').onclick = async () => {
   $('discovery-message').hidden = false; $('discovery-message').textContent = '正在读取文档并识别操作；普通文档的模型解析可能需要 1–3 分钟…';
   busy = true; lockEditor(true);
   try {
-    const result = await bridge.apiPost('discover', { target_url: $('auto-url').value.trim(), api_key: $('auto-key').value, document_url: $('auto-doc-url').value.trim(), document_text: $('auto-doc-text').value, auth: { mode: $('auto-auth').value, name: $('auto-auth-name').value.trim() } });
+    const result = await bridge.apiPost('discover', { target_url: $('auto-url').value.trim(), api_key: $('auto-key').value, document_url: $('auto-doc-url').value.trim(), document_text: $('auto-doc-text').value, document_provider_id: $('auto-model').value, auth: { mode: $('auto-auth').value, name: $('auto-auth-name').value.trim() } });
     automaticResult = result;
     $('discovery-message').textContent = result.message + (result.source ? `\n文档来源：${result.source}` : '') + (!result.operations.length && result.methods.length ? `\n服务端声明的方法：${result.methods.join('、')}` : '');
     operationGroups($('discovered-operations'), result.operations);
@@ -379,7 +379,15 @@ $('save-permissions').onclick = async () => {
   catch (error) { $('permissions-error').textContent = error.message; $('permissions-error').hidden = false; }
   finally { controls.forEach((control, index) => { control.disabled = previous[index]; }); }
 };
+async function loadDocumentModels() {
+  try {
+    const result = await bridge.apiGet('document-models');
+    for (const model of result.models || []) {
+      const option = el('option', model.id); option.value = model.id; $('auto-model').append(option);
+    }
+  } catch { /* Default model remains available when listing is temporarily unavailable. */ }
+}
 try {
   if (!bridge) throw new Error('请从 AstrBot 插件详情中的「API 管理」打开此页面。');
-  await bridge.ready(); await refresh();
+  await bridge.ready(); await refresh(); void loadDocumentModels();
 } catch (error) { notice(error.message, true); $('list').replaceChildren(); $('add').disabled = true; }

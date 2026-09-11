@@ -20,11 +20,13 @@
    <label>API Key / Token<input id="auto-key" type="password" autocomplete="off" placeholder="填写你的 Key；公开接口可留空"></label>
    <label>API 文档网页（可选）<input id="auto-doc-url" type="url" placeholder="粘贴平台的 API 说明页面链接，无需 OpenAPI 格式"></label>
    <details class="form-section" id="auto-more"><summary>粘贴文档 / 手动指定 Key 位置</summary>
+    <label>文档解析模型<select id="auto-model"><option value="">跟随 AstrBot 默认模型</option></select></label>
+    <p class="hint">只影响本页文档识别，不修改聊天模型设置。</p>
     <label>接口说明或请求示例<textarea id="auto-doc-text" rows="5" spellcheck="false" placeholder="粘贴文档正文、参数表、cURL 示例、Markdown 或 JSON/YAML 接口定义"></textarea></label>
     <div class="grid"><label>Key 传递方式<select id="auto-auth"><option value="auto">根据文档识别</option><option value="bearer">Authorization: Bearer</option><option value="header">自定义 Header</option><option value="query">Query 参数</option><option value="none">不附加 Key</option></select></label><label id="auto-auth-name-label" hidden>Key 字段名称<input id="auto-auth-name" placeholder="例如 X-API-Key 或 api_key"></label></div>
    </details>
    <button id="discover" class="primary">识别可用操作</button>
-   <p class="hint">普通文档会交给 AstrBot 默认聊天模型生成草稿，API Key 不发送给解析模型；请核对结果后开启操作。识别不会调用业务接口。</p>
+   <p class="hint">普通文档会交给所选 AstrBot 模型生成草稿，API Key 不发送给解析模型；请核对结果后开启操作。识别不会调用业务接口。</p>
    <div id="discovery-message" class="notice" role="status" hidden></div><div id="discovered-operations"></div>
   </section>
   <section id="panel-curl" role="tabpanel" hidden><h3>从请求示例开始</h3><p class="muted">粘贴一条 cURL，解析为草稿后继续填写用途和参数。解析不会执行请求。</p><label>cURL 命令<textarea id="curl-text" rows="10" spellcheck="false" placeholder="curl 'https://api.example.com/items?limit=20'"></textarea></label><button id="parse-curl" class="primary">解析为表单草稿</button><p class="hint">支持 URL、请求方法、Header、JSON 与表单。不执行 shell，不读取本地文件；暂不支持的选项会明确提示。</p></section>

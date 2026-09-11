@@ -56,6 +56,7 @@ class ApiImportPlugin(Star):
             ("delete", self.page_delete, ["POST"]),
             ("import-curl", self.page_import_curl, ["POST"]),
             ("discover", self.page_discover, ["POST"]),
+            ("document-models", self.page_document_models, ["GET"]),
             ("batch", self.page_batch, ["POST"]),
             ("permissions", self.page_permissions, ["POST"]),
         ):
@@ -158,10 +159,23 @@ class ApiImportPlugin(Star):
     async def page_permissions(self):
         return await self._page_mutate("permissions")
 
-    async def _read_document(self, prompt, system_prompt):
-        provider = await self.context.get_using_provider_async()
-        if provider is None:
-            raise DiscoveryError("请先在 AstrBot 配置默认聊天模型，再识别普通文档")
+    async def page_document_models(self):
+        if self.closed:
+            return error_response("插件已卸载，请刷新页面", status_code=503)
+        models = []
+        for provider in self.context.get_all_providers():
+            meta = provider.meta()
+            models.append({"id": meta.id, "model": meta.model})
+        return json_response({"models": models})
+
+    async def _read_document(self, prompt, system_prompt, provider_id=""):
+        provider = (
+            self.context.get_provider_by_id(provider_id)
+            if provider_id
+            else await self.context.get_using_provider_async()
+        )
+        if provider is None or not callable(getattr(provider, "text_chat", None)):
+            raise DiscoveryError("所选文档解析模型不可用，请选择已配置的文本模型")
         try:
             async with asyncio.timeout(180):
                 result = await provider.text_chat(
@@ -169,13 +183,11 @@ class ApiImportPlugin(Star):
                 )
         except TimeoutError:
             raise DiscoveryError(
-                "文档解析模型超过 180 秒未完成，请缩短文档或调整 AstrBot 默认模型后重试"
+                "文档解析模型超过 180 秒未完成，请缩短文档或选择其他文档解析模型后重试"
             ) from None
         except Exception as exc:
             logger.warning("API 文档模型请求失败，异常类型：" + type(exc).__name__)
-            raise DiscoveryError(
-                "文档解析模型请求失败，请检查 AstrBot 默认聊天模型是否可用"
-            ) from None
+            raise DiscoveryError("文档解析模型请求失败，请选择其他文档解析模型后重试") from None
         return result.completion_text
 
     async def page_discover(self):
@@ -185,8 +197,18 @@ class ApiImportPlugin(Star):
             return error_response("已有自动识别任务进行中，请稍后重试", status_code=429)
         try:
             payload = await request.json()
+            if not isinstance(payload, dict):
+                raise DiscoveryError("请求必须是 JSON 对象")
+            provider_id = payload.get("document_provider_id", "")
+            if not isinstance(provider_id, str) or len(provider_id) > 200:
+                raise DiscoveryError("文档解析模型选项无效")
+
+            async def read_document(prompt, system):
+                return await self._read_document(prompt, system, provider_id)
+
             async with self.discovery_lock:
-                result = await self.discovery.run(payload)
+                worker = Discovery(client=self.discovery.client, reader=read_document)
+                result = await worker.run(payload)
             return json_response(result)
         except DiscoveryError as exc:
             return error_response(str(exc))
