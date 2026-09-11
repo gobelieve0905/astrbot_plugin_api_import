@@ -73,6 +73,7 @@ class Definition:
     parameters: dict
     request: dict
     response: dict
+    display_name: str = ""
 
     @property
     def tool_name(self):
@@ -172,6 +173,7 @@ def parse_definitions(raw: str) -> list[Definition]:
                         or node["$param"] not in props
                     ):
                         raise DefinitionError(f"{prefix}.{field}: $param 必须单独引用已定义参数")
+        display_name = value.get("display_name") or "api_" + name
         description = value["description"]
         if value.get("display_name"):
             description = value["display_name"] + "。" + description
@@ -181,6 +183,7 @@ def parse_definitions(raw: str) -> list[Definition]:
             if previous != identity or connection["operation"] in operations:
                 raise DefinitionError(f"{prefix}: 同一接入账户的名称、平台或操作标识不一致")
             operations.add(connection["operation"])
+            display_name = connection["name"] + " / " + display_name
             description = "接入账户：" + connection["name"] + "。" + description
         result.append(
             Definition(
@@ -190,6 +193,7 @@ def parse_definitions(raw: str) -> list[Definition]:
                 parameters,
                 request,
                 copy.deepcopy(value.get("response", {})),
+                display_name,
             )
         )
     return result

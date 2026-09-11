@@ -5,9 +5,16 @@
 <main>
   <header><div><p class="eyebrow">API TOOLBOX <span>0.1.2</span></p><h1>API 管理</h1><p class="muted">将你的接口，变成对话中可用的工具。</p></div><button class="primary" id="add">＋ 新增 API</button></header>
   <div id="notice" class="notice" role="status" aria-live="polite" hidden></div>
+  <div id="overview">
   <section class="toolbar"><label class="search"><span>搜索</span><input id="search" type="search" placeholder="名称、用途或请求地址" aria-label="搜索 API"></label><span id="count" class="muted"></span><select id="method-filter" aria-label="按请求方法筛选"><option value="">全部方法</option><option>GET</option><option>POST</option><option>PUT</option><option>PATCH</option><option>DELETE</option><option>HEAD</option><option>OPTIONS</option></select><button id="permissions">调用权限</button><button id="refresh">刷新列表</button></section>
-  <p class="hint">按接入账户管理，展开查看操作。名称用于区分账户，Token 不在列表展示。</p>
+  <p class="hint">按接入账户管理，点击进入账户查看操作。名称用于区分账户，Token 不在列表展示。</p>
   <section id="list" aria-label="API 列表"><p class="muted">正在连接 AstrBot…</p></section>
+  </div>
+  <section id="account-page" hidden aria-label="API 账户详情">
+   <button id="back-accounts">← 返回账户列表</button>
+   <div class="account-page-head"><div><h2 id="account-page-title"></h2><p id="account-page-count" class="muted"></p></div><div class="card-actions"><button id="account-settings">账户设置</button><button id="account-delete" class="danger">删除接入</button></div></div>
+   <h3>账户操作</h3><p class="hint">在这里编辑、启停和删除当前账户的操作。</p><div id="account-operation-list"></div>
+  </section>
   <footer>保存后立即生效 · 接口定义与原插件配置同步</footer>
 </main>
 <dialog id="editor" aria-labelledby="editor-title">

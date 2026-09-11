@@ -17,12 +17,15 @@ from .platforms import platform_catalog
 
 
 class ImportedTool(FunctionTool):
+    result_status_format = "api_import_v1"
+
     def __init__(self, definition, executor):
         super().__init__(
             name=definition.tool_name,
             description=definition.description,
             parameters=definition.parameters,
         )
+        self.display_name = definition.display_name
         self.definition = definition
         self.executor = executor
         self.available = True

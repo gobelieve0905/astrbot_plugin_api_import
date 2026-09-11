@@ -42,7 +42,7 @@ async function refresh() {
   renderList();
   if (state.error) notice(`原有配置需要修复：${state.error}\n请在插件配置中修复 JSON 后刷新；原始数据未被覆盖。`, true);
 }
-const expandedConnections = new Set();
+let activeAccount = null;
 function actionButton(label, callback, style = '') {
   const button = el('button', label, style); button.disabled = busy;
   button.onclick = () => Promise.resolve(callback()).catch((error) => notice(error.message, true));
@@ -59,7 +59,21 @@ function operationCard(item) {
   details.append(el('summary', '接口详情'), el('p', `工具标识：api_${item.name}`, 'hint'), el('p', item.request.url, 'endpoint'), el('p', item.description, 'muted'));
   card.append(heading, details); return card;
 }
+function enterAccount(connection) { activeAccount = connection.id; renderList(); }
+$('back-accounts').onclick = () => { activeAccount = null; renderList(); };
 function renderList() {
+  const accountItems = state.items.filter((item) => item.connection?.id === activeAccount);
+  if (activeAccount && !accountItems.length) activeAccount = null;
+  $('overview').hidden = !!activeAccount; $('account-page').hidden = !activeAccount;
+  if (activeAccount) {
+    const connection = accountItems[0].connection;
+    $('account-page-title').textContent = connection.name;
+    $('account-page-count').textContent = `${accountItems.length} 个操作 · ${accountItems.filter((item) => item.enabled !== false).length} 个启用`;
+    $('account-operation-list').replaceChildren(...accountItems.map(operationCard));
+    $('account-settings').disabled = $('account-delete').disabled = busy;
+    $('account-settings').onclick = () => openConnection(connection);
+    $('account-delete').onclick = () => deleteConnection(connection).catch((error) => notice(error.message, true));
+  }
   const list = $('list'); list.replaceChildren();
   const term = $('search').value.trim().toLowerCase();
   const items = state.items.filter((item) => (!$('method-filter').value || item.request.method === $('method-filter').value) && [item.name, item.display_name || '', item.connection?.name || '', item.connection?.platform || '', item.description, item.request.url].some((v) => v.toLowerCase().includes(term)));
@@ -85,14 +99,9 @@ function renderList() {
     const card = el('section', undefined, 'connection-card'); card.dataset.connectionId = connection.id;
     const header = el('div', undefined, 'connection-header');
     const heading = el('div'); heading.append(el('h2', connection.name), el('p', `AppLovin Report · ${all.length} 个操作 · ${all.filter((item) => item.enabled !== false).length} 个启用`, 'muted'));
-    const actions = el('div', undefined, 'card-actions'); actions.append(actionButton('管理接入', () => openConnection(connection)), actionButton('删除接入', () => deleteConnection(connection), 'danger'));
+    const actions = el('div', undefined, 'card-actions'); actions.append(actionButton('进入账户', () => enterAccount(connection)), actionButton('删除接入', () => deleteConnection(connection), 'danger'));
     header.append(heading, actions);
-    const details = el('details', undefined, 'connection-details');
-    details.open = !!term || !!$('method-filter').value || expandedConnections.has(connection.id);
-    details.append(el('summary', `查看操作（${members.length}）`));
-    for (const item of members) details.append(operationCard(item));
-    details.addEventListener('toggle', () => { if (details.open) expandedConnections.add(connection.id); else expandedConnections.delete(connection.id); });
-    card.append(header, details); list.append(card);
+    card.append(header); list.append(card);
   }
 }
 let connectionDraft = null, connectionRevision = null, connectionDirty = false;

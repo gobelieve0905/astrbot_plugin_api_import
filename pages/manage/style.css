@@ -13,3 +13,5 @@ main{max-width:1380px}.toolbar{flex-wrap:wrap}.toolbar #count{font-size:12px}.co
 @media(max-width:640px){.connection-header{padding:16px;flex-wrap:wrap}.connection-header .card-actions{margin-left:auto}.connection-details .card{padding:14px 16px}.operation-heading{align-items:flex-start;flex-direction:column}.operation-heading .card-actions{align-self:flex-end}.operation-card .card-top{flex-wrap:wrap}.connection-details>summary{padding:10px 16px}.toolbar #count{white-space:normal}}
 
 .search>span{white-space:nowrap}
+
+.account-page-head{display:flex;justify-content:space-between;align-items:center;gap:16px;margin:22px 0}.account-page-head h2{font-size:24px;overflow-wrap:anywhere}.account-page-head>div{min-width:0}#account-operation-list{margin-top:16px}@media(max-width:640px){.account-page-head{align-items:flex-start;flex-direction:column}}

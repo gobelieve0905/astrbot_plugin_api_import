@@ -231,8 +231,11 @@ def run():
         first_card = page.locator(".connection-card").filter(
             has=page.get_by_role("heading", name="国内投放账户", exact=True)
         )
-        assert first_card.locator(".connection-details").get_attribute("open") is None
-        first_card.get_by_role("button", name="管理接入").click()
+        assert page.locator("#overview .connection-details").count() == 0
+        first_card.get_by_role("button", name="进入账户").click()
+        assert page.locator("#overview").is_hidden()
+        assert page.locator("#account-operation-list .operation-card").count() == 6
+        page.locator("#account-settings").click()
         assert page.locator("#connection-token").input_value() == ""
         page.locator("#connection-name").fill("国内主账户")
         page.locator("#connection-token").fill("rotated-key")
@@ -250,14 +253,15 @@ def run():
         first_card = page.locator(".connection-card").filter(
             has=page.get_by_role("heading", name="国内主账户", exact=True)
         )
-        first_card.locator(".connection-details > summary").click()
-        first_card.locator(".operation-card").first.get_by_role(
+        page.locator("#account-operation-list .operation-card").first.get_by_role(
             "button", name="编辑", exact=True
         ).click()
         page.locator("#display-name").fill("投放花费日报")
         page.locator("#save").click()
         page.locator("#editor").wait_for(state="hidden")
         assert catalog.snapshot()["items"][before]["display_name"] == "投放花费日报"
+        page.screenshot(path=str(output / "account-detail.png"), animations="disabled")
+        page.locator("#back-accounts").click()
         page.locator("#search").fill("国内主账户")
         assert page.locator(".connection-card").count() == 1
         page.locator("#search").fill("")
