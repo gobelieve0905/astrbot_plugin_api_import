@@ -1,0 +1,41 @@
+[
+  {
+    "name": "query_items",
+    "description": "查询指定集合中的条目，可指定返回数量。",
+    "enabled": false,
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "collection_id": {"type": "string", "description": "集合 ID"},
+        "limit": {"type": "integer", "minimum": 1, "maximum": 100, "default": 20}
+      },
+      "required": ["collection_id"]
+    },
+    "request": {
+      "method": "GET",
+      "url": "https://api.example.com/collections/{collection_id}/items",
+      "query": {"limit": {"$param": "limit"}},
+      "timeout": 30
+    },
+    "response": {"pointer": "/data", "preview_chars": 4000, "save": true}
+  },
+  {
+    "name": "update_item",
+    "description": "修改指定条目的名称和启用状态。此工具会实际修改数据。",
+    "enabled": false,
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "id": {"type": "string", "description": "条目 ID"},
+        "title": {"type": "string", "description": "新名称"},
+        "active": {"type": "boolean", "description": "是否启用"}
+      },
+      "required": ["id"]
+    },
+    "request": {
+      "method": "PATCH",
+      "url": "https://api.example.com/items/{id}",
+      "json": {"title": {"$param": "title"}, "active": {"$param": "active"}}
+    }
+  }
+]
