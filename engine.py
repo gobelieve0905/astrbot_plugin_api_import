@@ -23,8 +23,17 @@ class ExecutionError(ValueError):
 
 def resolve(value, arguments):
     if isinstance(value, dict):
-        if set(value) == {"$param"}:
-            return arguments.get(value["$param"], MISSING)
+        if "$param" in value:
+            resolved = arguments.get(value["$param"], MISSING)
+            if "$join" in value and resolved is not MISSING:
+                if not isinstance(resolved, list) or any(
+                    isinstance(x, (dict, list)) or x is None for x in resolved
+                ):
+                    raise ExecutionError("需要标量数组才能按文档拼接参数")
+                return value["$join"].join(
+                    str(x).lower() if isinstance(x, bool) else str(x) for x in resolved
+                )
+            return resolved
         result = {}
         for key, child in value.items():
             resolved = resolve(child, arguments)
@@ -121,7 +130,7 @@ class Executor:
                 if field in request:
                     body = resolve(request[field], arguments)
                     if body is MISSING:
-                        raise ExecutionError("请求体引用的参数未提供")
+                        continue  # Optional whole-body parameter absent: send no body.
                     if field == "form":
                         kwargs[target] = wire_mapping(body)
                     else:

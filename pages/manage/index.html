@@ -5,15 +5,28 @@
 <main>
   <header><div><p class="eyebrow">API TOOLBOX <span>0.0.1</span></p><h1>API 管理</h1><p class="muted">将你的接口，变成对话中可用的工具。</p></div><button class="primary" id="add">＋ 新增 API</button></header>
   <div id="notice" class="notice" role="status" aria-live="polite" hidden></div>
-  <section class="toolbar"><label class="search"><span>搜索</span><input id="search" type="search" placeholder="名称、用途或请求地址" aria-label="搜索 API"></label><span id="count" class="muted"></span><button id="refresh">刷新列表</button></section>
+  <section class="toolbar"><label class="search"><span>搜索</span><input id="search" type="search" placeholder="名称、用途或请求地址" aria-label="搜索 API"></label><span id="count" class="muted"></span><select id="method-filter" aria-label="按请求方法筛选"><option value="">全部方法</option><option>GET</option><option>POST</option><option>PUT</option><option>PATCH</option><option>DELETE</option><option>HEAD</option><option>OPTIONS</option></select><button id="permissions">调用权限</button><button id="refresh">刷新列表</button></section>
   <section id="list" aria-label="API 列表"><p class="muted">正在连接 AstrBot…</p></section>
   <footer>保存后立即生效 · 接口定义与原插件配置同步</footer>
 </main>
 <dialog id="editor" aria-labelledby="editor-title">
  <div class="dialog-head"><div><p class="eyebrow">接口定义</p><h2 id="editor-title">新增 API</h2></div><button id="close-editor" aria-label="关闭编辑器">✕</button></div>
- <div class="tabs" role="tablist" aria-label="填写方式"><button id="tab-form" data-mode="form" role="tab" aria-selected="true">可视化表单</button><button id="tab-curl" data-mode="curl" role="tab" aria-selected="false">粘贴 cURL</button><button id="tab-json" data-mode="json" role="tab" aria-selected="false">JSON 编辑</button></div>
+ <div class="tabs" role="tablist" aria-label="填写方式"><button id="tab-auto" data-mode="auto" role="tab" aria-selected="false">自动接入</button><button id="tab-form" data-mode="form" role="tab" aria-selected="true">可视化表单</button><button id="tab-curl" data-mode="curl" role="tab" aria-selected="false">粘贴 cURL</button><button id="tab-json" data-mode="json" role="tab" aria-selected="false">JSON 编辑</button></div>
  <div id="editor-error" class="notice error" role="alert" hidden></div>
  <div class="dialog-body">
+  <section id="panel-auto" role="tabpanel" hidden>
+   <h3>填写 URL 与 API Key</h3><p class="muted">从接口文档自动识别参数和可用操作，再选择允许调用的范围。</p>
+   <label>Target URL<input id="auto-url" type="url" placeholder="https://api.example.com 或具体接口地址"></label>
+   <label>API Key / Token<input id="auto-key" type="password" autocomplete="off" placeholder="填写你的 Key；公开接口可留空"></label>
+   <details class="form-section" id="auto-more"><summary>补充设置（无法自动识别时使用）</summary>
+    <label>OpenAPI / Swagger 文档 URL<input id="auto-doc-url" type="url" placeholder="https://api.example.com/openapi.json"></label>
+    <label>或粘贴 OpenAPI 文档<textarea id="auto-doc-text" rows="5" spellcheck="false" placeholder="支持 OpenAPI 3.0 / 3.1、Swagger 2.0，JSON 或 YAML"></textarea></label>
+    <div class="grid"><label>Key 传递方式<select id="auto-auth"><option value="auto">根据文档识别</option><option value="bearer">Authorization: Bearer</option><option value="header">自定义 Header</option><option value="query">Query 参数</option><option value="none">不附加 Key</option></select></label><label id="auto-auth-name-label" hidden>Key 字段名称<input id="auto-auth-name" placeholder="例如 X-API-Key 或 api_key"></label></div>
+   </details>
+   <button id="discover" class="primary">识别可用操作</button>
+   <p class="hint">识别过程只读取文档及服务端方法声明，不测试业务操作。没有规范文档时，可补充文档或使用其他填写方式。</p>
+   <div id="discovery-message" class="notice" role="status" hidden></div><div id="discovered-operations"></div>
+  </section>
   <section id="panel-curl" role="tabpanel" hidden><h3>从请求示例开始</h3><p class="muted">粘贴一条 cURL，解析为草稿后继续填写用途和参数。解析不会执行请求。</p><label>cURL 命令<textarea id="curl-text" rows="10" spellcheck="false" placeholder="curl 'https://api.example.com/items?limit=20'"></textarea></label><button id="parse-curl" class="primary">解析为表单草稿</button><p class="hint">支持 URL、请求方法、Header、JSON 与表单。不执行 shell，不读取本地文件；暂不支持的选项会明确提示。</p></section>
   <section id="panel-json" role="tabpanel" hidden><p class="muted">填写单个接口定义对象。适合复制现有配置，或编辑复杂 JSON Schema。</p><label>接口 JSON<textarea id="json-text" rows="22" spellcheck="false"></textarea></label></section>
   <section id="panel-form" role="tabpanel">
@@ -28,6 +41,11 @@
   </section>
  </div>
  <div class="dialog-actions"><span id="save-note" class="muted">保存接口定义，不会调用目标 API。</span><button id="cancel">取消</button><button id="save" class="primary">保存并生效</button></div>
+</dialog>
+<dialog id="permissions-dialog" aria-labelledby="permissions-title">
+ <div class="dialog-head"><div><p class="eyebrow">调用范围</p><h2 id="permissions-title">管理调用权限</h2></div><button id="close-permissions" aria-label="关闭权限设置">✕</button></div>
+ <div class="dialog-body"><p class="muted">按服务和请求方法选择允许 AstrBot 调用的操作。这里的开关不会授予 API Key 平台端权限，也不会执行目标请求。</p><div id="permissions-error" class="notice error" role="alert" hidden></div><div id="permission-groups"></div></div>
+ <div class="dialog-actions"><button id="cancel-permissions">取消</button><button id="save-permissions" class="primary">保存调用权限</button></div>
 </dialog>
 <dialog id="confirm-dialog" aria-labelledby="confirm-title"><h2 id="confirm-title"></h2><p id="confirm-text"></p><div class="dialog-actions"><button id="confirm-no">取消</button><button id="confirm-yes" class="danger">确认</button></div></dialog>
 <datalist id="parameter-names"></datalist>

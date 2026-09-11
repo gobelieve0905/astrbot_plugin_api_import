@@ -1,6 +1,6 @@
 name: astrbot_plugin_api_import
 display_name: API 工具接入
-desc: 通过通用接口定义，将 HTTP API 注册为 AstrBot 工具，支持页面管理、表单与 cURL 接入、参数映射和结果提取。
+desc: 通过通用接口定义，将 HTTP API 注册为 AstrBot 工具，支持 OpenAPI 自动接入、调用权限管理、表单与 cURL 接入和结果提取。
 version: 0.0.1
 author: gobelieve
 repo: https://github.com/gobelieve0905/astrbot_plugin_api_import

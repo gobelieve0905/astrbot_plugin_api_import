@@ -3,18 +3,21 @@
 Run separately with playwright installed, e.g. python -B tests/browser_check.py.
 """
 
+import asyncio
 import importlib
 import json
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
+from discovery_fixture import spec
 from playwright.sync_api import sync_playwright
 from test_engine import Definitions, root
 
 Catalog = importlib.import_module("api_import_test.catalog").Catalog
 ConflictError = importlib.import_module("api_import_test.catalog").ConflictError
 import_curl = importlib.import_module("api_import_test.importing").import_curl
+DiscoveryModule = importlib.import_module("api_import_test.discovery")
 config = {"tools_json": "[]"}
 
 
@@ -68,11 +71,29 @@ class Handler(BaseHTTPRequestHandler):
         try:
             body = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
             action = self.path.split("/")[-1]
-            result = (
-                {"definition": import_curl(body["text"])}
-                if action == "import-curl"
-                else catalog.mutate(action, body)
-            )
+            if action == "import-curl":
+                result = {"definition": import_curl(body["text"])}
+            elif action == "discover":
+
+                async def discover():
+                    import httpx
+
+                    def respond(req):
+                        if "/undocumented/" in req.url.path or req.url.path == "/undocumented":
+                            return httpx.Response(404)
+                        return httpx.Response(200, json=spec())
+
+                    engine = DiscoveryModule.Discovery(
+                        httpx.AsyncClient(transport=httpx.MockTransport(respond))
+                    )
+                    try:
+                        return await engine.run(body)
+                    finally:
+                        await engine.close()
+
+                result = asyncio.run(discover())
+            else:
+                result = catalog.mutate(action, body)
             self.send(json.dumps(result).encode())
         except (Definitions.DefinitionError, ConflictError) as exc:
             self.send(json.dumps({"message": str(exc)}).encode(), status=400)
@@ -94,6 +115,7 @@ def run():
         page.goto(f"http://127.0.0.1:{server.server_port}/")
         page.get_by_text("接入你的第一个 API", exact=True).wait_for()
         page.locator("#add").click()
+        page.locator("#tab-form").click()
         page.locator("#name").fill("query_items")
         page.locator("#description").fill("查询集合中的条目，按指定数量返回结果。")
         page.locator("#url").fill("https://api.example.com/collections/{collection_id}/items")
@@ -172,6 +194,7 @@ def run():
         page.locator("#search").fill("")
         # Duplicate rejected; draft stays open and unchanged.
         page.locator("#add").click()
+        page.locator("#tab-form").click()
         page.locator("#name").fill("query_items")
         page.locator("#description").fill("duplicate")
         page.locator("#url").fill("https://api.example.com")
@@ -181,10 +204,55 @@ def run():
         page.locator("#cancel").click()
         page.locator("#confirm-yes").click()
         page.locator("#editor").wait_for(state="hidden")
+        # Default two-field automatic discovery, grouped opt-in methods, and runtime permission management.
+        page.locator("#add").click()
+        assert page.locator("#panel-auto").is_visible()
+        page.locator("#auto-url").fill("https://api.example.test/v1")
+        page.locator("#auto-key").fill("synthetic-key")
+        page.locator("#discover").click()
+        page.locator("#discovered-operations .operation-row").nth(3).wait_for()
+        assert page.locator("#discovered-operations input:checked").count() == 0
+        page.locator("#discovered-operations .operation-group").filter(
+            has=page.locator(".section-head", has_text="GET（")
+        ).locator(".section-head input").check()
+        page.screenshot(path=str(output / "automatic-operations.png"))
+        before = len(catalog.snapshot()["items"])
+        page.locator("#save").click()
+        page.locator("#editor").wait_for(state="hidden")
+        incoming = catalog.snapshot()["items"][before:]
+        assert len(incoming) == 4
+        assert all(item["enabled"] == (item["request"]["method"] == "GET") for item in incoming)
+        page.locator("#method-filter").select_option("POST")
+        assert all(
+            card.locator(".method").inner_text() == "POST" for card in page.locator(".card").all()
+        )
+        page.locator("#method-filter").select_option("")
+        page.locator("#permissions").click()
+        group = page.locator("#permission-groups .operation-group").filter(
+            has=page.locator(".section-head", has_text="https://api.example.test · GET")
+        )
+        group.locator(".section-head input").uncheck()
+        page.screenshot(path=str(output / "permissions.png"))
+        page.locator("#save-permissions").click()
+        page.locator("#permissions-dialog").wait_for(state="hidden")
+        assert all(not item["enabled"] for item in catalog.snapshot()["items"][before:])
+        # Changing a key invalidates cached discovery definitions.
+        page.locator("#add").click()
+        page.locator("#auto-url").fill("https://api.example.test/v1")
+        page.locator("#auto-key").fill("synthetic-key")
+        page.locator("#discover").click()
+        page.locator("#discovered-operations .operation-row").nth(3).wait_for()
+        page.locator("#auto-key").fill("changed-key")
+        assert page.locator("#save").is_disabled()
+        assert page.locator("#discovered-operations .operation-row").count() == 0
+        page.locator("#cancel").click()
+        page.locator("#confirm-yes").click()
+        page.locator("#editor").wait_for(state="hidden")
         # Narrow screen layout, modal and body do not overflow horizontally.
         page.set_viewport_size({"width": 390, "height": 844})
         assert page.evaluate("document.documentElement.scrollWidth <= innerWidth")
         page.locator("#add").click()
+        page.locator("#tab-form").click()
         page.locator("#add-param").click()
         page.locator('[data-add-map="query"]').click()
         assert page.locator("#editor").evaluate("(node) => node.scrollWidth <= node.clientWidth")

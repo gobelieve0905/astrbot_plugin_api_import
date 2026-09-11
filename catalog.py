@@ -46,6 +46,23 @@ class Catalog:
                 if index is None:
                     raise ConflictError("该接口已不存在，请刷新列表")
                 items[index] = value
+        elif action == "batch":
+            incoming = payload.get("definitions")
+            if not isinstance(incoming, list) or not incoming or len(incoming) > 200:
+                raise DefinitionError("请提供 1–200 个已识别的操作")
+            items.extend(incoming)
+        elif action == "permissions":
+            selections = payload.get("enabled_names")
+            known = {item["name"] for item in items}
+            if (
+                not isinstance(selections, list)
+                or any(not isinstance(name, str) for name in selections)
+                or not set(selections).issubset(known)
+                or len(selections) != len(set(selections))
+            ):
+                raise DefinitionError("调用权限列表无效，请刷新后重试")
+            for item in items:
+                item["enabled"] = item["name"] in selections
         elif action == "delete":
             name = payload.get("name")
             if not any(item["name"] == name for item in items):

@@ -151,7 +151,10 @@ def parse_definitions(raw: str) -> list[Definition]:
             for node in _walk(request.get(field)):
                 if isinstance(node, dict) and "$param" in node:
                     if (
-                        set(node) != {"$param"}
+                        (
+                            set(node) not in ({"$param"}, {"$param", "$join"})
+                            or ("$join" in node and node["$join"] not in (",", " ", "|"))
+                        )
                         or not isinstance(node["$param"], str)
                         or node["$param"] not in props
                     ):

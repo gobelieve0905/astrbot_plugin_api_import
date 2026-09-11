@@ -81,6 +81,30 @@ class CatalogTest(unittest.TestCase):
             self.save(sample())
         self.assertEqual(self.config["tools_json"], "not json")
 
+    def test_batch_and_permissions_are_atomic(self):
+        revision = self.catalog.snapshot()["revision"]
+        state = self.catalog.mutate(
+            "batch",
+            {
+                "revision": revision,
+                "definitions": [sample("get"), {**sample("post"), "enabled": False}],
+            },
+        )
+        state = self.catalog.mutate(
+            "permissions", {"revision": state["revision"], "enabled_names": ["post"]}
+        )
+        self.assertEqual([item["enabled"] for item in state["items"]], [False, True])
+        before = copy.deepcopy(self.config)
+        for action, payload in [
+            ("batch", {"definitions": [sample("get")]}),
+            ("permissions", {"enabled_names": ["missing"]}),
+        ]:
+            with self.assertRaises(Definitions.DefinitionError):
+                self.catalog.mutate(action, {"revision": state["revision"], **payload})
+            self.assertEqual(before, self.config)
+        with self.assertRaises(CatalogModule.ConflictError):
+            self.catalog.mutate("permissions", {"revision": revision, "enabled_names": []})
+
     def test_failed_apply_does_not_claim_success(self):
         def fail(raw, definitions):
             raise OSError("disk failure")

@@ -11,6 +11,7 @@ from astrbot.core.agent.tool import FunctionTool
 
 from .catalog import Catalog, ConflictError
 from .definitions import DefinitionError, parse_definitions
+from .discovery import Discovery, DiscoveryError
 from .engine import Executor
 from .importing import import_curl
 
@@ -46,12 +47,17 @@ class ApiImportPlugin(Star):
         self.closed = False
         self.catalog = Catalog(config, self._apply_saved)
         self.edit_lock = asyncio.Lock()
+        self.discovery = Discovery()
+        self.discovery_lock = asyncio.Lock()
         self.web_handlers = []
         for route, handler, methods in (
             ("catalog", self.page_catalog, ["GET"]),
             ("save", self.page_save, ["POST"]),
             ("delete", self.page_delete, ["POST"]),
             ("import-curl", self.page_import_curl, ["POST"]),
+            ("discover", self.page_discover, ["POST"]),
+            ("batch", self.page_batch, ["POST"]),
+            ("permissions", self.page_permissions, ["POST"]),
         ):
             self.context.register_web_api(
                 f"/astrbot_plugin_api_import/{route}", handler, methods, "API 接口管理"
@@ -146,6 +152,28 @@ class ApiImportPlugin(Star):
         except (DefinitionError, ValueError) as exc:
             return error_response(str(exc))
 
+    async def page_batch(self):
+        return await self._page_mutate("batch")
+
+    async def page_permissions(self):
+        return await self._page_mutate("permissions")
+
+    async def page_discover(self):
+        if self.closed:
+            return error_response("插件已卸载，请刷新页面", status_code=503)
+        if self.discovery_lock.locked():
+            return error_response("已有自动识别任务进行中，请稍后重试", status_code=429)
+        try:
+            payload = await request.json()
+            async with self.discovery_lock:
+                result = await self.discovery.run(payload)
+            return json_response(result)
+        except DiscoveryError as exc:
+            return error_response(str(exc))
+        except Exception:
+            logger.warning("API 文档解析失败；未执行目标业务操作")
+            return error_response("接口文档结构暂不能识别，请补充规范文档或使用手动接入")
+
     @filter.permission_type(filter.PermissionType.ADMIN)
     @filter.command("api_tools")
     async def list_tools(self, event: AstrMessageEvent):
@@ -198,6 +226,7 @@ class ApiImportPlugin(Star):
         manager = self.context.get_llm_tool_manager()
         owned = {id(tool) for tool in self.tools}
         manager.func_list[:] = [tool for tool in manager.func_list if id(tool) not in owned]
+        await self.discovery.close()
         if self.executor:
             await self.executor.close()
         self.tools = []

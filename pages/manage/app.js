@@ -4,6 +4,8 @@ const bridge = window.AstrBotPluginPage;
 let state = { items: [], revision: null };
 let draft = {}, originalName = null, editRevision = null, mode = 'form', dirty = false, busy = false;
 let confirmResolve = null;
+let automaticResult = null, permissionRevision = null;
+const httpMethods = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'HEAD', 'OPTIONS'];
 const blank = () => ({ name: '', description: '', enabled: false, parameters: { type: 'object', properties: {} }, request: { method: 'GET', url: '' } });
 const own = (object, key) => Object.hasOwn(object, key);
 const object = (value) => value !== null && typeof value === 'object' && !Array.isArray(value);
@@ -45,11 +47,11 @@ function renderList() {
   const list = $('list');
   list.replaceChildren();
   const term = $('search').value.trim().toLowerCase();
-  const items = state.items.filter((item) => [item.name, item.description, item.request.url].some((v) => v.toLowerCase().includes(term)));
+  const items = state.items.filter((item) => (!$('method-filter').value || item.request.method === $('method-filter').value) && [item.name, item.description, item.request.url].some((v) => v.toLowerCase().includes(term)));
   $('count').textContent = `${state.items.length} 个 API · ${state.items.filter((item) => item.enabled !== false).length} 个启用`;
   if (!items.length) {
     const empty = el('div', undefined, 'empty');
-    empty.append(el('div', '{ }', 'symbol'), el('h2', term ? '没有匹配的 API' : '接入你的第一个 API'), el('p', term ? '试试其他名称或地址。' : '填写表单、粘贴 cURL，或导入已有 JSON。', 'muted'));
+    empty.append(el('div', '{ }', 'symbol'), el('h2', term ? '没有匹配的 API' : '接入你的第一个 API'), el('p', term ? '试试其他名称或地址。' : '输入 URL 和 API Key，自动识别可用操作。', 'muted'));
     if (!term) { const add = el('button', '＋ 新增 API', 'primary'); add.onclick = () => openEditor(); empty.append(add); }
     list.append(empty); return;
   }
@@ -196,8 +198,9 @@ function readJSON() { let value; try { value = JSON.parse($('json-text').value);
 function bodyVisibility() { const kind = $('body-kind').value; $('body-fields').hidden = !['json', 'form'].includes(kind); $('body-raw-label').hidden = kind !== 'raw'; }
 function displayMode(next) {
   mode = next;
-  for (const key of ['form', 'curl', 'json']) { $(`panel-${key}`).hidden = key !== next; $(`tab-${key}`).setAttribute('aria-selected', String(key === next)); }
-  $('save').disabled = next === 'curl';
+  for (const key of ['auto', 'form', 'curl', 'json']) { $(`panel-${key}`).hidden = key !== next; $(`tab-${key}`).setAttribute('aria-selected', String(key === next)); }
+  $('save').disabled = next === 'curl' || (next === 'auto' && !automaticResult?.operations.some((item) => item.supported && !state.items.some((known) => known.name === item.definition.name)));
+  $('save').textContent = next === 'auto' ? '保存操作与权限' : '保存并生效';
 }
 function switchMode(next) {
   if (mode === next) return;
@@ -213,7 +216,8 @@ function openEditor(item) {
   originalName = item?.name ?? null; editRevision = state.revision; draft = clone(item || blank()); dirty = false;
   $('editor-title').textContent = item ? '编辑 API' : '新增 API'; $('curl-text').value = ''; notice('', false, true);
   $('json-text').value = JSON.stringify(draft, null, 2);
-  try { renderForm(); displayMode('form'); }
+  resetAutomatic();
+  try { renderForm(); displayMode(item ? 'form' : 'auto'); }
   catch (error) { displayMode('json'); notice(error.message, false, true); }
   $('editor').showModal();
 }
@@ -221,6 +225,7 @@ async function closeEditor() {
   if (busy) return;
   if (dirty && !await confirmAction('放弃修改？', '尚未保存的草稿将被丢弃。', '放弃修改')) return;
   $('editor').close();
+  resetAutomatic();
 }
 function lockEditor(locked) {
   for (const control of $('editor').querySelectorAll('button,input,select,textarea')) {
@@ -231,6 +236,7 @@ function lockEditor(locked) {
 }
 async function save() {
   if (busy) return;
+  if (mode === 'auto') return saveAutomatic();
   try {
     const definition = mode === 'form' ? readForm() : readJSON();
     if (!definition.name || !definition.description || !definition.request?.url) throw new Error('请填写工具名称、用途说明和请求地址');
@@ -243,6 +249,7 @@ async function save() {
 $('save').onclick = save;
 $('add').onclick = () => openEditor();
 $('search').oninput = renderList;
+$('method-filter').onchange = renderList;
 $('refresh').onclick = () => refresh().then(() => { if (!state.error) notice('列表已刷新。'); }).catch((error) => notice(error.message, true));
 $('close-editor').onclick = closeEditor; $('cancel').onclick = closeEditor;
 $('editor').addEventListener('cancel', (event) => { event.preventDefault(); closeEditor(); });
@@ -265,6 +272,109 @@ $('parse-curl').onclick = async () => {
   try { const result = await bridge.apiPost('import-curl', { text: $('curl-text').value }); draft = result.definition; renderForm(); displayMode('form'); dirty = true; notice('已生成草稿。请修改工具名称、填写用途，并按需将固定值改为模型参数。', false, true); }
   catch (error) { notice(error.message, true, true); }
   finally { $('parse-curl').disabled = false; }
+};
+function resetAutomatic() {
+  automaticResult = null;
+  for (const id of ['auto-url', 'auto-key', 'auto-doc-url', 'auto-doc-text', 'auto-auth-name']) $(id).value = '';
+  $('auto-auth').value = 'auto'; $('auto-more').open = false;
+  $('auto-auth-name-label').hidden = true;
+  $('discovered-operations').replaceChildren(); $('discovery-message').hidden = true;
+}
+function operationGroups(container, records, permissionMode = false) {
+  container.replaceChildren();
+  const groups = new Map();
+  for (const record of records) {
+    const url = record.definition?.request.url || '';
+    let service = '识别结果';
+    if (permissionMode) { try { service = new URL(url).origin; } catch { service = '其他接口'; } }
+    const key = service + ' ' + record.method;
+    if (!groups.has(key)) groups.set(key, { service, method: record.method, records: [] });
+    groups.get(key).records.push(record);
+  }
+  for (const group of groups.values()) {
+    const section = el('section', undefined, 'operation-group');
+    const header = el('div', undefined, 'section-head');
+    const all = checkbox(false);
+    const label = labeled(`${permissionMode ? group.service + ' · ' : ''}${group.method}（${group.records.length} 个操作）`, all);
+    label.className = 'check'; header.append(label); section.append(header);
+    const checkboxes = [];
+    for (const record of group.records) {
+      const row = el('div', undefined, 'operation-row');
+      const control = checkbox(permissionMode ? record.definition.enabled !== false : false);
+      const duplicate = !permissionMode && record.supported && state.items.some((item) => item.name === record.definition.name);
+      control.disabled = !record.supported || duplicate;
+      control.dataset.operationName = record.definition?.name || '';
+      const title = labeled(`${record.method} ${record.path}`, control); title.className = 'check';
+      row.append(title, el('p', record.description || '', 'muted'));
+      if (record.auth) row.append(el('small', `Key 方式：${record.auth}；实际权限未验证`));
+      if (record.reason || duplicate) row.append(el('small', duplicate ? '已接入，请在调用权限中调整开关。' : record.reason, 'operation-warning'));
+      if (record.definition) {
+        const details = el('details'); details.append(el('summary', '查看参数'));
+        for (const [name, schema] of Object.entries(record.definition.parameters?.properties || {})) {
+          details.append(el('p', `${name} · ${Array.isArray(schema.type) ? schema.type.join(' / ') : schema.type || '复合结构'}${record.definition.parameters.required?.includes(name) ? ' · 必填' : ' · 可选'}${Object.hasOwn(schema, 'default') ? ' · 有默认值' : ''}`, 'hint'));
+        }
+        if (!Object.keys(record.definition.parameters?.properties || {}).length) details.append(el('p', '无需模型填写参数', 'hint'));
+        row.append(details);
+      }
+      section.append(row); checkboxes.push(control);
+    }
+    const selectable = checkboxes.filter((control) => !control.disabled);
+    function sync() { all.disabled = !selectable.length; all.checked = selectable.length > 0 && selectable.every((c) => c.checked); all.indeterminate = selectable.some((c) => c.checked) && !all.checked; }
+    all.onchange = () => { for (const control of selectable) control.checked = all.checked; dirty = true; };
+    for (const control of selectable) control.onchange = sync;
+    sync(); container.append(section);
+  }
+}
+$('auto-auth').onchange = () => { $('auto-auth-name-label').hidden = !['header', 'query'].includes($('auto-auth').value); };
+// Editing connection details invalidates the old discovery so a different key/URL cannot be saved by mistake.
+for (const id of ['auto-url', 'auto-key', 'auto-doc-url', 'auto-doc-text', 'auto-auth', 'auto-auth-name']) {
+  $(id).addEventListener('input', () => { automaticResult = null; $('discovered-operations').replaceChildren(); $('discovery-message').hidden = true; if (mode === 'auto') $('save').disabled = true; });
+}
+$('discover').onclick = async () => {
+  if (busy) return;
+  automaticResult = null;
+  $('discovered-operations').replaceChildren(); notice('', false, true);
+  $('discovery-message').hidden = false; $('discovery-message').textContent = '正在查找接口文档并识别操作…';
+  busy = true; lockEditor(true);
+  try {
+    const result = await bridge.apiPost('discover', { target_url: $('auto-url').value.trim(), api_key: $('auto-key').value, document_url: $('auto-doc-url').value.trim(), document_text: $('auto-doc-text').value, auth: { mode: $('auto-auth').value, name: $('auto-auth-name').value.trim() } });
+    automaticResult = result;
+    $('discovery-message').textContent = result.message + (result.source ? `\n文档来源：${result.source}` : '') + (!result.operations.length && result.methods.length ? `\n服务端声明的方法：${result.methods.join('、')}` : '');
+    operationGroups($('discovered-operations'), result.operations);
+    if (!result.operations.some((item) => item.supported)) $('auto-more').open = true;
+    dirty = true;
+  } catch (error) { $('discovery-message').textContent = error.message; $('auto-more').open = true; }
+  finally { busy = false; lockEditor(false); displayMode('auto'); }
+};
+async function saveAutomatic() {
+  if (!automaticResult) return;
+  const enabled = new Set([...$('discovered-operations').querySelectorAll('input[data-operation-name]:checked')].map((input) => input.dataset.operationName));
+  const definitions = automaticResult.operations.filter((item) => item.supported && !state.items.some((known) => known.name === item.definition.name)).map((item) => ({ ...clone(item.definition), enabled: enabled.has(item.definition.name) }));
+  if (!definitions.length) return;
+  lockEditor(true);
+  try {
+    await mutate('batch', { revision: editRevision, definitions });
+    dirty = false; $('editor').close(); resetAutomatic();
+    notice(`已接入 ${definitions.length} 个操作，允许调用 ${definitions.filter((item) => item.enabled).length} 个。可在「调用权限」中随时调整。`);
+  } catch (error) { notice(error.message, true, true); }
+  finally { lockEditor(false); }
+}
+$('permissions').onclick = () => {
+  permissionRevision = state.revision; $('permissions-error').hidden = true;
+  operationGroups($('permission-groups'), state.items.map((item) => ({ method: item.request.method, path: item.request.url, description: item.description, definition: item, supported: true })), true);
+  if (!state.items.length) $('permission-groups').append(el('p', '尚未接入任何操作。请先新增 API。', 'muted'));
+  $('permissions-dialog').showModal();
+};
+$('close-permissions').onclick = $('cancel-permissions').onclick = () => { if (!busy) $('permissions-dialog').close(); };
+$('permissions-dialog').addEventListener('cancel', (event) => { if (busy) event.preventDefault(); });
+$('save-permissions').onclick = async () => {
+  if (busy) return;
+  const enabled_names = [...$('permission-groups').querySelectorAll('input[data-operation-name]:checked')].map((input) => input.dataset.operationName);
+  const controls = [...$('permissions-dialog').querySelectorAll('input,button')];
+  const previous = controls.map((control) => control.disabled); controls.forEach((control) => { control.disabled = true; });
+  try { await mutate('permissions', { revision: permissionRevision, enabled_names }); $('permissions-dialog').close(); notice('调用权限已保存并立即生效。'); }
+  catch (error) { $('permissions-error').textContent = error.message; $('permissions-error').hidden = false; }
+  finally { controls.forEach((control, index) => { control.disabled = previous[index]; }); }
 };
 try {
   if (!bridge) throw new Error('请从 AstrBot 插件详情中的「API 管理」打开此页面。');

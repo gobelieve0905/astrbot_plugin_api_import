@@ -142,6 +142,41 @@ async def main():
     )
     assert deleted.status_code == 200 and manager.func_list == [foreign]
     assert json.loads(Path(config_path).read_text(encoding="utf-8-sig"))["tools_json"] == "[]"
+    from discovery_fixture import spec
+
+    await plugin.discovery.client.aclose()
+    discovery_requests = []
+
+    def document_response(req):
+        discovery_requests.append(req)
+        return httpx.Response(200, json=spec())
+
+    plugin.discovery.client = httpx.AsyncClient(transport=httpx.MockTransport(document_response))
+    discovered = await web_call(
+        plugin.page_discover,
+        {"target_url": "https://api.example.test/v1", "api_key": "synthetic-key"},
+    )
+    assert discovered.status_code == 200
+    operations = json.loads(discovered.body)["operations"]
+    assert len(operations) == 4 and all(item["supported"] for item in operations)
+    assert all("synthetic-key" not in str(req.url) + str(req.headers) for req in discovery_requests)
+    incoming = [dict(item["definition"], enabled=item["method"] == "GET") for item in operations]
+    batch = await web_call(
+        plugin.page_batch,
+        {"revision": plugin.catalog.snapshot()["revision"], "definitions": incoming},
+    )
+    assert batch.status_code == 200 and len(plugin.tools) == 2
+    assert all(item.definition.request["method"] == "GET" for item in plugin.tools)
+    cached = plugin.tools[0]
+    permissions = await web_call(
+        plugin.page_permissions,
+        {"revision": plugin.catalog.snapshot()["revision"], "enabled_names": []},
+    )
+    assert permissions.status_code == 200 and manager.func_list == [foreign]
+    assert not json.loads(await cached.call(None))["ok"]
+    restored = AstrBotConfig(config_path=config_path, default_config={"tools_json": "[]"})
+    assert len(json.loads(restored["tools_json"])) == 4
+    assert all(not item["enabled"] for item in json.loads(restored["tools_json"]))
     await plugin.terminate()
     assert manager.func_list == [foreign]
     assert not context.registered_web_apis
