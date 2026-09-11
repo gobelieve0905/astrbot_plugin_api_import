@@ -64,7 +64,12 @@ async def main():
             lambda request: httpx.Response(200, json=json.loads(request.content))
         )
     )
-    assert json.loads(await tool.call(None, text="hello world"))["data"] == {"text": "hello world"}
+    successful = await tool.call(None, text="hello world")
+    assert not successful.isError
+    assert json.loads(successful.content[0].text)["data"] == {"text": "hello world"}
+    invalid_call = await tool.call(None, unexpected=True)
+    assert invalid_call.isError
+    assert "data.plugins.astrbot_plugin_feishu_agent_card" not in sys.modules
     event = types.SimpleNamespace(
         message_str='/api_test api_echo {"text": "hello world"}', plain_result=lambda text: text
     )
@@ -114,7 +119,7 @@ async def main():
         json.loads(Path(config_path).read_text(encoding="utf-8-sig"))["tools_json"]
         == plugin.config["tools_json"]
     )
-    assert not json.loads(await tool.call(None, text="old cached call"))["ok"]
+    assert not json.loads((await tool.call(None, text="old cached call")).content[0].text)["ok"]
     assert [item.name for item in manager.func_list] == ["foreign", "api_renamed"]
     stale = await web_call(plugin.page_delete, {"revision": revision, "name": "renamed"})
     assert stale.status_code == 409
@@ -177,7 +182,7 @@ async def main():
     assert renamed_connection.status_code == 200
     assert "接入账户：验收账户" in plugin.tools[0].description
     assert plugin.tools[0].display_name.startswith("验收账户 / ")
-    assert plugin.tools[0].result_status_format == "api_import_v1"
+    assert not hasattr(plugin.tools[0], "result_status_format")
     assert not cached_before_rename.available
     cached = plugin.tools[0]
     permissions = await web_call(
@@ -189,14 +194,14 @@ async def main():
     )
     assert permissions.status_code == 200 and len(plugin.tools) == 1
     assert "cohort_sessions" in plugin.tools[0].name
-    assert not json.loads(await cached.call(None))["ok"]
+    assert not json.loads((await cached.call(None)).content[0].text)["ok"]
     restored = AstrBotConfig(config_path=config_path, default_config={"tools_json": "[]"})
     assert len(json.loads(restored["tools_json"])) == 6
     assert sum(item["enabled"] for item in json.loads(restored["tools_json"])) == 1
     await plugin.terminate()
     assert manager.func_list == [foreign]
     assert not context.registered_web_apis
-    assert not json.loads(await tool.call(None, text="late"))["ok"]
+    assert not json.loads((await tool.call(None, text="late")).content[0].text)["ok"]
     # Reload registers exactly one tool and respects disabled definitions.
     again = module.ApiImportPlugin(context, {"tools_json": json.dumps([definition])})
     await again.initialize()

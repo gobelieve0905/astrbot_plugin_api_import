@@ -8,6 +8,7 @@ from astrbot.api.event import AstrMessageEvent, filter
 from astrbot.api.star import Context, Star, StarTools
 from astrbot.api.web import error_response, json_response, request
 from astrbot.core.agent.tool import FunctionTool
+from mcp.types import CallToolResult, TextContent
 
 from .catalog import Catalog, ConflictError
 from .definitions import DefinitionError, parse_definitions
@@ -17,8 +18,6 @@ from .platforms import platform_catalog
 
 
 class ImportedTool(FunctionTool):
-    result_status_format = "api_import_v1"
-
     def __init__(self, definition, executor):
         super().__init__(
             name=definition.tool_name,
@@ -32,11 +31,13 @@ class ImportedTool(FunctionTool):
 
     async def call(self, context, **kwargs):
         if not self.available or not self.active:
-            return json.dumps(
-                {"ok": False, "error": "该工具已更新、删除或停用，请重新选择工具"},
-                ensure_ascii=False,
-            )
-        return json.dumps(await self.executor.execute(self.definition, kwargs), ensure_ascii=False)
+            result = {"ok": False, "error": "该工具已更新、删除或停用，请重新选择工具"}
+        else:
+            result = await self.executor.execute(self.definition, kwargs)
+        return CallToolResult(
+            content=[TextContent(type="text", text=json.dumps(result, ensure_ascii=False))],
+            isError=not result["ok"],
+        )
 
 
 class ApiImportPlugin(Star):
@@ -209,7 +210,9 @@ class ApiImportPlugin(Star):
             yield event.plain_result("参数必须是 JSON 对象")
             return
         result = await tool.call(None, **arguments)
-        yield event.plain_result(result)
+        yield event.plain_result(
+            "\n".join(block.text for block in result.content if block.type == "text")
+        )
 
     @filter.permission_type(filter.PermissionType.ADMIN)
     @filter.command("api_history")

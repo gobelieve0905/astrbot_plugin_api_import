@@ -45,3 +45,7 @@ update-connection 和 delete-connection 复用 edit_lock、revision 和原子替
 账户详情为页面内部独立视图，返回列表保留搜索条件；账户列表不再内嵌操作。ImportedTool 提供 display_name（账户名 / 操作名）与 result_status_format=api_import_v1。名称只用于展示，不参与调用路由；飞书卡片按工具内部 ID 配对开始/结束，声明格式的结果才解析 ok/status，避免误判其他工具业务数据。
 
 本次历史排查确认目标回合工具返回 HTTP 400，最终 assistant 仅有 think 块，无正文；不保留聊天内容或业务参数。上游错误正文此前未记录，因此不推断 HTTP 400 的具体原因。隔离测试覆盖同样的失败与无正文流程，不调用真实报表或模型，不发送测试消息。
+
+## 2026-09-11：解除专用协议耦合
+
+移除 result_status_format 和 api_import_v1。工具返回宿主支持的 mcp.types.CallToolResult，content 保留 JSON 结果，isError 表达失败；管理员试调用提取文本显示。显示名称为可选展示属性，无插件发现、导入或版本依赖。真实框架隔离测试不加载飞书插件，覆盖成功、失败、试调用与管理。

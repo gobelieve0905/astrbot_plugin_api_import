@@ -133,4 +133,4 @@
 
 开发和验收说明见 [开发文档](https://github.com/gobelieve0905/astrbot_plugin_api_import/blob/develop/docs/DEVELOPMENT.md)。
 
-工具调用展示：配合新版飞书卡片插件，过程、工具摘要和来源使用「账户自定义名称 / 操作自定义名称」。内部工具标识保持不变，其他客户端的展示方式由对应客户端决定。API 失败会显示 HTTP 状态，模型未返回正文时明确提示，不将思考内容作为回答。
+工具调用结果采用 AstrBot 支持的标准 `CallToolResult`，通过 `isError` 表示失败，HTTP 状态保留在结果正文中。工具提供可选显示名称，客户端可以采用或回退为内部标识。不依赖任何卡片插件，单独安装即可执行、试调用和管理 API；具体展示由客户端负责。
