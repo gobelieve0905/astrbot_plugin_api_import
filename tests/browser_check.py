@@ -194,6 +194,7 @@ def run():
         assert page.locator("#platform-operations input:checked").count() == 0
         page.locator("#save").click()
         assert page.locator("#editor-error").is_visible()
+        page.locator("#platform-name").fill("国内投放账户")
         page.locator("#platform-token").fill("synthetic-key")
         page.locator('[data-operation-id="advertiser"]').check()
         page.locator('[data-operation-id="cohort_sessions"]').check()
@@ -220,11 +221,59 @@ def run():
         assert catalog.snapshot()["items"][-1]["enabled"]
         # Additional accounts do not collide, and all-off onboarding remains possible.
         page.locator("#add").click()
+        page.locator("#platform-name").fill("海外投放账户")
         page.locator("#platform-token").fill("second-synthetic-key")
         page.locator("#save").click()
         page.locator("#editor").wait_for(state="hidden")
         assert len(catalog.snapshot()["items"]) == before + 12
         assert not any(item["enabled"] for item in catalog.snapshot()["items"][-6:])
+        assert page.locator(".connection-card").count() == 2
+        first_card = page.locator(".connection-card").filter(
+            has=page.get_by_role("heading", name="国内投放账户", exact=True)
+        )
+        assert first_card.locator(".connection-details").get_attribute("open") is None
+        first_card.get_by_role("button", name="管理接入").click()
+        assert page.locator("#connection-token").input_value() == ""
+        page.locator("#connection-name").fill("国内主账户")
+        page.locator("#connection-token").fill("rotated-key")
+        page.locator("#connection-operations input").first.check()
+        page.locator("#save-connection").click()
+        page.locator("#connection-editor").wait_for(state="hidden")
+        assert all(
+            item["request"]["query"]["api_key"] == "rotated-key"
+            for item in catalog.snapshot()["items"][before : before + 6]
+        )
+        assert all(
+            item["request"]["query"]["api_key"] == "second-synthetic-key"
+            for item in catalog.snapshot()["items"][-6:]
+        )
+        first_card = page.locator(".connection-card").filter(
+            has=page.get_by_role("heading", name="国内主账户", exact=True)
+        )
+        first_card.locator(".connection-details > summary").click()
+        first_card.locator(".operation-card").first.get_by_role(
+            "button", name="编辑", exact=True
+        ).click()
+        page.locator("#display-name").fill("投放花费日报")
+        page.locator("#save").click()
+        page.locator("#editor").wait_for(state="hidden")
+        assert catalog.snapshot()["items"][before]["display_name"] == "投放花费日报"
+        page.locator("#search").fill("国内主账户")
+        assert page.locator(".connection-card").count() == 1
+        page.locator("#search").fill("")
+        page.screenshot(path=str(output / "accounts-desktop.png"), animations="disabled")
+        page.evaluate("document.documentElement.dataset.theme='dark'")
+        page.screenshot(path=str(output / "accounts-dark.png"), animations="disabled")
+        page.set_viewport_size({"width": 390, "height": 844})
+        assert page.evaluate("document.documentElement.scrollWidth <= innerWidth")
+        page.screenshot(path=str(output / "accounts-mobile.png"), animations="disabled")
+        second_card = page.locator(".connection-card").filter(
+            has=page.get_by_role("heading", name="海外投放账户", exact=True)
+        )
+        second_card.get_by_role("button", name="删除接入").click()
+        page.locator("#confirm-yes").click()
+        page.wait_for_function("document.querySelectorAll('.connection-card').length === 1")
+        assert len(catalog.snapshot()["items"]) == before + 6
         # Narrow screen layout, modal and body do not overflow horizontally.
         page.set_viewport_size({"width": 390, "height": 844})
         assert page.evaluate("document.documentElement.scrollWidth <= innerWidth")

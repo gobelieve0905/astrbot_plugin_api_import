@@ -4,6 +4,7 @@ import copy
 import hashlib
 import json
 
+from .connections import enrich_legacy, update_connection
 from .definitions import DefinitionError, parse_definitions
 from .platforms import build_connection
 
@@ -22,7 +23,7 @@ class Catalog:
         revision = hashlib.sha256(str(raw).encode()).hexdigest()
         try:
             parse_definitions(raw)
-            return {"items": json.loads(raw), "revision": revision, "error": None}
+            return {"items": enrich_legacy(json.loads(raw)), "revision": revision, "error": None}
         except DefinitionError as exc:
             return {"items": [], "revision": revision, "error": str(exc)}
 
@@ -49,6 +50,8 @@ class Catalog:
                 items[index] = value
         elif action == "connect-platform":
             items.extend(build_connection(payload, items))
+        elif action in ("update-connection", "delete-connection"):
+            items = update_connection(items, payload, delete=action == "delete-connection")
         elif action == "batch":
             incoming = payload.get("definitions")
             if not isinstance(incoming, list) or not incoming or len(incoming) > 200:

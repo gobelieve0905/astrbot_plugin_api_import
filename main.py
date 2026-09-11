@@ -56,6 +56,8 @@ class ApiImportPlugin(Star):
             ("platforms", self.page_platforms, ["GET"]),
             ("connect-platform", self.page_connect_platform, ["POST"]),
             ("batch", self.page_batch, ["POST"]),
+            ("update-connection", self.page_update_connection, ["POST"]),
+            ("delete-connection", self.page_delete_connection, ["POST"]),
             ("permissions", self.page_permissions, ["POST"]),
         ):
             self.context.register_web_api(
@@ -150,6 +152,12 @@ class ApiImportPlugin(Star):
             return json_response({"definition": import_curl(payload.get("text"))})
         except (DefinitionError, ValueError) as exc:
             return error_response(str(exc))
+
+    async def page_update_connection(self):
+        return await self._page_mutate("update-connection")
+
+    async def page_delete_connection(self):
+        return await self._page_mutate("delete-connection")
 
     async def page_batch(self):
         return await self._page_mutate("batch")

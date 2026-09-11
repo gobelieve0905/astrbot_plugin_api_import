@@ -172,6 +172,9 @@ def platform_catalog():
 def build_connection(payload, existing):
     if payload.get("platform_id") != "applovin_report":
         raise DefinitionError("请选择支持的平台")
+    display_name = payload.get("name", "")
+    if not isinstance(display_name, str) or len(display_name.strip()) > 80:
+        raise DefinitionError("接入名称最多 80 个字符")
     token = payload.get("token")
     if (
         not isinstance(token, str)
@@ -197,4 +200,12 @@ def build_connection(payload, existing):
             for operation in OPERATIONS
         ]
         if not any(item["name"] in names for item in definitions):
+            for item, operation in zip(definitions, OPERATIONS, strict=True):
+                item["display_name"] = operation[1]
+                item["connection"] = {
+                    "id": suffix,
+                    "name": display_name.strip() or "AppLovin 账户 " + suffix,
+                    "platform": "applovin_report",
+                    "operation": operation[0],
+                }
             return copy.deepcopy(definitions)

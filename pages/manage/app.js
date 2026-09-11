@@ -42,36 +42,92 @@ async function refresh() {
   renderList();
   if (state.error) notice(`原有配置需要修复：${state.error}\n请在插件配置中修复 JSON 后刷新；原始数据未被覆盖。`, true);
 }
+const expandedConnections = new Set();
+function actionButton(label, callback, style = '') {
+  const button = el('button', label, style); button.disabled = busy;
+  button.onclick = () => Promise.resolve(callback()).catch((error) => notice(error.message, true));
+  return button;
+}
+function operationCard(item) {
+  const card = el('article', undefined, 'card operation-card');
+  const top = el('div', undefined, 'card-top');
+  top.append(el('span', item.display_name || `api_${item.name}`, 'card-title'), el('span', item.request.method, 'method'), el('span', item.enabled === false ? '已停用' : '已启用', `badge${item.enabled === false ? ' off' : ''}`));
+  const actions = el('div', undefined, 'card-actions');
+  actions.append(actionButton('编辑', () => openEditor(item)), actionButton(item.enabled === false ? '启用' : '停用', () => toggle(item)), actionButton('删除', () => remove(item), 'danger'));
+  const heading = el('div', undefined, 'operation-heading'); heading.append(top, actions);
+  const details = el('details', undefined, 'operation-details');
+  details.append(el('summary', '接口详情'), el('p', `工具标识：api_${item.name}`, 'hint'), el('p', item.request.url, 'endpoint'), el('p', item.description, 'muted'));
+  card.append(heading, details); return card;
+}
 function renderList() {
-  const list = $('list');
-  list.replaceChildren();
+  const list = $('list'); list.replaceChildren();
   const term = $('search').value.trim().toLowerCase();
-  const items = state.items.filter((item) => (!$('method-filter').value || item.request.method === $('method-filter').value) && [item.name, item.description, item.request.url].some((v) => v.toLowerCase().includes(term)));
-  $('count').textContent = `${state.items.length} 个 API · ${state.items.filter((item) => item.enabled !== false).length} 个启用`;
+  const items = state.items.filter((item) => (!$('method-filter').value || item.request.method === $('method-filter').value) && [item.name, item.display_name || '', item.connection?.name || '', item.connection?.platform || '', item.description, item.request.url].some((v) => v.toLowerCase().includes(term)));
+  const total = new Set(state.items.map((item) => item.connection ? 'connection:' + item.connection.id : 'tool:' + item.name)).size;
+  $('count').textContent = `${total} 个接入 · ${state.items.length} 个操作 · ${state.items.filter((item) => item.enabled !== false).length} 个启用`;
   if (!items.length) {
+    const filtered = !!term || !!$('method-filter').value;
     const empty = el('div', undefined, 'empty');
-    empty.append(el('div', '{ }', 'symbol'), el('h2', term ? '没有匹配的 API' : '接入你的第一个 API'), el('p', term ? '试试其他名称或地址。' : '选择平台并填写 Token，或手动添加接口。', 'muted'));
-    if (!term) { const add = el('button', '＋ 新增 API', 'primary'); add.onclick = () => openEditor(); empty.append(add); }
+    empty.append(el('div', '{ }', 'symbol'), el('h2', filtered ? '没有匹配的 API' : '接入你的第一个 API'), el('p', filtered ? '试试其他名称、地址或请求方法。' : '选择平台并填写 Token，或手动添加接口。', 'muted'));
+    if (!filtered) empty.append(actionButton('＋ 新增 API', () => openEditor(), 'primary'));
     list.append(empty); return;
   }
+  const groups = new Map();
   for (const item of items) {
-    const card = el('article', undefined, 'card');
-    const top = el('div', undefined, 'card-top');
-    top.append(el('span', `api_${item.name}`, 'card-title'), el('span', item.enabled === false ? '已停用' : '已启用', `badge${item.enabled === false ? ' off' : ''}`));
-    const bottom = el('div', undefined, 'card-bottom');
-    const endpoint = el('div', undefined, 'endpoint');
-    endpoint.append(el('span', item.request.method, 'method'), document.createTextNode(item.request.url));
-    const actions = el('div', undefined, 'card-actions');
-    for (const [label, callback, style] of [
-      ['编辑', () => openEditor(item), ''],
-      [item.enabled === false ? '启用' : '停用', () => toggle(item), ''],
-      ['删除', () => remove(item), 'danger'],
-    ]) {
-      const button = el('button', label, style); button.disabled = busy;
-      button.onclick = () => Promise.resolve(callback()).catch((error) => notice(error.message, true)); actions.append(button);
-    }
-    bottom.append(endpoint, actions); card.append(top, el('p', item.description, 'muted'), bottom); list.append(card);
+    const id = item.connection ? 'connection:' + item.connection.id : 'tool:' + item.name;
+    if (!groups.has(id)) groups.set(id, []);
+    groups.get(id).push(item);
   }
+  for (const members of groups.values()) {
+    const connection = members[0].connection;
+    if (!connection) { list.append(operationCard(members[0])); continue; }
+    const all = state.items.filter((item) => item.connection?.id === connection.id);
+    const card = el('section', undefined, 'connection-card'); card.dataset.connectionId = connection.id;
+    const header = el('div', undefined, 'connection-header');
+    const heading = el('div'); heading.append(el('h2', connection.name), el('p', `AppLovin Report · ${all.length} 个操作 · ${all.filter((item) => item.enabled !== false).length} 个启用`, 'muted'));
+    const actions = el('div', undefined, 'card-actions'); actions.append(actionButton('管理接入', () => openConnection(connection)), actionButton('删除接入', () => deleteConnection(connection), 'danger'));
+    header.append(heading, actions);
+    const details = el('details', undefined, 'connection-details');
+    details.open = !!term || !!$('method-filter').value || expandedConnections.has(connection.id);
+    details.append(el('summary', `查看操作（${members.length}）`));
+    for (const item of members) details.append(operationCard(item));
+    details.addEventListener('toggle', () => { if (details.open) expandedConnections.add(connection.id); else expandedConnections.delete(connection.id); });
+    card.append(header, details); list.append(card);
+  }
+}
+let connectionDraft = null, connectionRevision = null, connectionDirty = false;
+function openConnection(connection) {
+  connectionDraft = connection; connectionRevision = state.revision; connectionDirty = false;
+  $('connection-name').value = connection.name; $('connection-token').value = ''; $('connection-error').hidden = true;
+  $('connection-operations').replaceChildren();
+  for (const item of state.items.filter((value) => value.connection?.id === connection.id)) {
+    const control = checkbox(item.enabled !== false); control.dataset.operationName = item.name;
+    const label = el('label', item.display_name || item.name, 'check'); label.prepend(control);
+    const row = el('div', undefined, 'connection-permission'); row.append(label, el('span', item.request.method, 'method')); $('connection-operations').append(row);
+  }
+  $('connection-editor').showModal();
+}
+async function closeConnection() {
+  if (busy) return;
+  if (connectionDirty && !await confirmAction('放弃修改？', '接入名称、Token 和权限修改尚未保存。', '放弃修改')) return;
+  $('connection-editor').close(); $('connection-token').value = ''; connectionDraft = null;
+}
+$('close-connection').onclick = $('cancel-connection').onclick = closeConnection;
+$('connection-editor').addEventListener('cancel', (event) => { event.preventDefault(); closeConnection(); });
+$('connection-editor').addEventListener('input', () => { connectionDirty = true; });
+$('save-connection').onclick = async () => {
+  if (busy || !connectionDraft) return;
+  const controls = [...$('connection-editor').querySelectorAll('button,input')]; controls.forEach((node) => node.disabled = true);
+  try {
+    await mutate('update-connection', { revision: connectionRevision, connection_id: connectionDraft.id, name: $('connection-name').value, token: $('connection-token').value, enabled_names: [...$('connection-operations').querySelectorAll('input:checked')].map((node) => node.dataset.operationName) });
+    connectionDirty = false; $('connection-editor').close(); $('connection-token').value = ''; notice('接入名称、Token 和操作权限已保存。');
+  } catch (error) { $('connection-error').textContent = error.message; $('connection-error').hidden = false; }
+  finally { controls.forEach((node) => node.disabled = false); }
+};
+async function deleteConnection(connection) {
+  const revision = state.revision;
+  if (!await confirmAction('删除接入', `确定删除“${connection.name}”及其全部操作？其他账户不受影响。`, '删除接入')) return;
+  await mutate('delete-connection', { revision, connection_id: connection.id }); notice('接入已删除。');
 }
 async function mutate(endpoint, payload) {
   busy = true; renderList();
@@ -80,12 +136,12 @@ async function mutate(endpoint, payload) {
 }
 async function toggle(item) {
   await mutate('save', { revision: state.revision, original_name: item.name, definition: { ...clone(item), enabled: item.enabled === false } });
-  notice(`${item.name} 已${item.enabled === false ? '启用' : '停用'}，立即生效。`);
+  notice(`${item.display_name || item.name} 已${item.enabled === false ? '启用' : '停用'}，立即生效。`);
 }
 async function remove(item) {
   const revision = state.revision;
-  if (!await confirmAction('删除 API', `确定删除 ${item.name}？\n将移除接口定义及其工具，不会调用目标 API。`, '删除 API')) return;
-  await mutate('delete', { revision, name: item.name }); notice(`${item.name} 已删除。`);
+  if (!await confirmAction('删除 API', `确定删除 ${item.display_name || item.name}？\n将移除接口定义及其工具，不会调用目标 API。`, '删除 API')) return;
+  await mutate('delete', { revision, name: item.name }); notice(`${item.display_name || item.name} 已删除。`);
 }
 
 function selectOptions(values, selected) {
@@ -149,6 +205,7 @@ function assertFormSupported(value) {
 }
 function renderForm() {
   assertFormSupported(draft);
+  $('display-name').value = draft.display_name || '';
   $('name').value = draft.name || ''; $('description').value = draft.description || ''; $('enabled').checked = draft.enabled !== false;
   $('method').value = draft.request.method || 'GET'; $('url').value = draft.request.url || '';
   $('params').replaceChildren();
@@ -169,6 +226,7 @@ function renderForm() {
 }
 function readForm() {
   const value = clone(draft);
+  if ($('display-name').value.trim()) value.display_name = $('display-name').value.trim(); else delete value.display_name;
   value.name = $('name').value.trim(); value.description = $('description').value.trim(); value.enabled = $('enabled').checked;
   value.parameters ||= { type: 'object' };
   const properties = Object.create(null), required = [];
@@ -242,7 +300,7 @@ async function save() {
     if (!definition.name || !definition.description || !definition.request?.url) throw new Error('请填写工具名称、用途说明和请求地址');
     lockEditor(true);
     await mutate('save', { revision: editRevision, original_name: originalName, definition });
-    dirty = false; $('editor').close(); notice(`${definition.name} 已保存并生效。`);
+    dirty = false; $('editor').close(); notice(`${definition.display_name || definition.name} 已保存并生效。`);
   } catch (error) { notice(error.message, true, true); }
   finally { lockEditor(false); }
 }
@@ -274,7 +332,7 @@ $('parse-curl').onclick = async () => {
   finally { $('parse-curl').disabled = false; }
 };
 function resetPlatform() {
-  $('platform-token').value = '';
+  $('platform-token').value = ''; $('platform-name').value = '';
   renderPlatform();
 }
 function renderPlatform() {
@@ -300,7 +358,7 @@ async function savePlatform() {
   const enabled_operations = [...$('platform-operations').querySelectorAll('input:checked')].map((control) => control.dataset.operationId);
   lockEditor(true);
   try {
-    await mutate('connect-platform', { revision: editRevision, platform_id: $('platform-select').value, token, enabled_operations });
+    await mutate('connect-platform', { revision: editRevision, platform_id: $('platform-select').value, name: $('platform-name').value, token, enabled_operations });
     dirty = false; $('editor').close(); resetPlatform();
     notice(`平台已接入，已开启 ${enabled_operations.length} 个操作。可在「调用权限」中随时调整。`);
   } catch (error) { notice(error.message, true, true); }
@@ -312,7 +370,8 @@ function operationGroups(container, records) {
   for (const record of records) {
     const url = record.definition?.request.url || '';
     let service;
-    try { service = new URL(url).origin; } catch { service = '其他接口'; }
+    if (record.definition.connection) service = record.definition.connection.name + ' · ' + record.definition.connection.id;
+    else { try { service = new URL(url).origin; } catch { service = '其他接口'; } }
     const key = service + ' ' + record.method;
     if (!groups.has(key)) groups.set(key, { service, method: record.method, records: [] });
     groups.get(key).records.push(record);
@@ -328,7 +387,7 @@ function operationGroups(container, records) {
       const row = el('div', undefined, 'operation-row');
       const control = checkbox(record.definition.enabled !== false);
       control.dataset.operationName = record.definition?.name || '';
-      const title = labeled(`${record.definition.name} · ${record.method} ${record.path}`, control); title.className = 'check';
+      const title = labeled(`${record.definition.display_name || record.definition.name} · ${record.method}`, control); title.className = 'check';
       row.append(title, el('p', record.description || '', 'muted'));
       if (record.definition) {
         const details = el('details'); details.append(el('summary', '查看调用参数'));

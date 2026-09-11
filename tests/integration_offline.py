@@ -162,6 +162,21 @@ async def main():
         "synthetic-key" not in json.dumps(tool.parameters) + tool.description
         for tool in plugin.tools
     )
+    cached_before_rename = plugin.tools[0]
+    first = plugin.catalog.snapshot()["items"][0]
+    renamed_connection = await web_call(
+        plugin.page_update_connection,
+        {
+            "revision": plugin.catalog.snapshot()["revision"],
+            "connection_id": first["connection"]["id"],
+            "name": "验收账户",
+            "token": "",
+            "enabled_names": [item.definition.name for item in plugin.tools],
+        },
+    )
+    assert renamed_connection.status_code == 200
+    assert "接入账户：验收账户" in plugin.tools[0].description
+    assert not cached_before_rename.available
     cached = plugin.tools[0]
     permissions = await web_call(
         plugin.page_permissions,

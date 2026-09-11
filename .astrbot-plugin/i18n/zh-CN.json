@@ -1,1 +1,1 @@
-{"pages":{"manage":{"title":"API 管理","description":"选择平台填写 Token 快速接入，逐项管理调用权限，支持表单、cURL 和 JSON。"}}}
+{"pages":{"manage":{"title":"API 管理","description":"按账户分组管理平台 API，自定义接入名称，独立维护 Token 和操作权限。"}}}

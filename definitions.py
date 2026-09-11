@@ -18,6 +18,18 @@ DEFINITION_SCHEMA = {
     "additionalProperties": False,
     "properties": {
         "name": {"type": "string", "pattern": NAME.pattern},
+        "display_name": {"type": "string", "minLength": 1, "maxLength": 80, "pattern": r"\S"},
+        "connection": {
+            "type": "object",
+            "additionalProperties": False,
+            "required": ["id", "name", "platform", "operation"],
+            "properties": {
+                "id": {"type": "string", "pattern": "^[a-zA-Z0-9_]{1,48}$"},
+                "name": {"type": "string", "minLength": 1, "maxLength": 80, "pattern": r"\S"},
+                "platform": {"type": "string", "pattern": NAME.pattern},
+                "operation": {"type": "string", "pattern": NAME.pattern},
+            },
+        },
         "description": {"type": "string", "minLength": 1, "maxLength": 4000},
         "enabled": {"type": "boolean"},
         "parameters": {"type": "object"},
@@ -87,6 +99,7 @@ def parse_definitions(raw: str) -> list[Definition]:
     if not isinstance(values, list) or len(values) > 200:
         raise DefinitionError("tools_json 必须是数组，最多 200 个工具")
     result, names = [], set()
+    connections = {}
     for index, value in enumerate(values):
         prefix = f"工具[{index + 1}]"
         errors = list(Draft202012Validator(DEFINITION_SCHEMA).iter_errors(value))
@@ -159,10 +172,20 @@ def parse_definitions(raw: str) -> list[Definition]:
                         or node["$param"] not in props
                     ):
                         raise DefinitionError(f"{prefix}.{field}: $param 必须单独引用已定义参数")
+        description = value["description"]
+        if value.get("display_name"):
+            description = value["display_name"] + "。" + description
+        if connection := value.get("connection"):
+            identity = (connection["name"], connection["platform"])
+            previous, operations = connections.setdefault(connection["id"], (identity, set()))
+            if previous != identity or connection["operation"] in operations:
+                raise DefinitionError(f"{prefix}: 同一接入账户的名称、平台或操作标识不一致")
+            operations.add(connection["operation"])
+            description = "接入账户：" + connection["name"] + "。" + description
         result.append(
             Definition(
                 name,
-                value["description"],
+                description,
                 value.get("enabled", True),
                 parameters,
                 request,
