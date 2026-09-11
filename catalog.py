@@ -22,8 +22,13 @@ class Catalog:
         raw = self.config.get("tools_json", "[]")
         revision = hashlib.sha256(str(raw).encode()).hexdigest()
         try:
-            parse_definitions(raw)
-            return {"items": enrich_legacy(json.loads(raw)), "revision": revision, "error": None}
+            definitions = parse_definitions(raw)
+            return {
+                "items": enrich_legacy(json.loads(raw)),
+                "revision": revision,
+                "error": None,
+                "tool_names": {item.name: item.tool_name for item in definitions},
+            }
         except DefinitionError as exc:
             return {"items": [], "revision": revision, "error": str(exc)}
 

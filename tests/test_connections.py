@@ -13,6 +13,39 @@ CatalogModule = importlib.import_module("api_import_test.catalog")
 
 
 class ConnectionTests(unittest.TestCase):
+    def test_actual_names_follow_account_and_explicit_override(self):
+        items = Platforms.build_connection(
+            {
+                "platform_id": "applovin_report",
+                "name": "AppLovin Report Ninety",
+                "token": "fake",
+                "enabled_operations": ["advertiser"],
+            },
+            [],
+        )
+        parsed = Definitions.parse_definitions(json.dumps(items))
+        self.assertEqual(parsed[0].tool_name, "AppLovin_Report_Ninety_advertiser")
+        items[0]["tool_name"] = "Ninety_daily_spend"
+        self.assertEqual(
+            Definitions.parse_definitions(json.dumps(items))[0].tool_name, "Ninety_daily_spend"
+        )
+        items[1]["tool_name"] = "Ninety_daily_spend"
+        with self.assertRaises(Definitions.DefinitionError):
+            Definitions.parse_definitions(json.dumps(items))
+        items[1]["tool_name"] = "bad name"
+        with self.assertRaises(Definitions.DefinitionError):
+            Definitions.parse_definitions(json.dumps(items))
+
+    def test_auto_names_remain_unique_across_duplicate_accounts(self):
+        items = self.first + self.second
+        for item in items:
+            item["connection"]["name"] = "Same Account"
+        parsed = Definitions.parse_definitions(json.dumps(items))
+        self.assertEqual(len({d.tool_name for d in parsed}), len(items))
+        self.assertTrue(all(Definitions.TOOL_NAME.fullmatch(d.tool_name) for d in parsed))
+        unicode_names = Definitions.parse_definitions(json.dumps(self.first + self.second))
+        self.assertEqual(len({d.tool_name for d in unicode_names}), len(items))
+
     def setUp(self):
         self.first = Platforms.build_connection(
             {

@@ -98,6 +98,7 @@ def run():
         page.locator("#add").click()
         page.locator("#tab-form").click()
         page.locator("#name").fill("query_items")
+        page.locator("#tool-name").fill("My_account_query")
         page.locator("#description").fill("查询集合中的条目，按指定数量返回结果。")
         page.locator("#url").fill("https://api.example.com/collections/{collection_id}/items")
         page.locator("#detect-path").click()
@@ -111,6 +112,8 @@ def run():
         page.locator("#save").click()
         page.locator("#editor").wait_for(state="hidden")
         item = catalog.snapshot()["items"][0]
+        assert item["tool_name"] == "My_account_query"
+        assert catalog.snapshot()["tool_names"][item["name"]] == "My_account_query"
         assert item["parameters"]["required"] == ["collection_id"]
         assert item["request"]["query"]["limit"] == 20
         page.get_by_role("button", name="停用", exact=True).click()
@@ -177,6 +180,7 @@ def run():
         page.locator("#add").click()
         page.locator("#tab-form").click()
         page.locator("#name").fill("query_items")
+        page.locator("#tool-name").fill("My_account_query")
         page.locator("#description").fill("duplicate")
         page.locator("#url").fill("https://api.example.com")
         page.locator("#save").click()

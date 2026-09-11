@@ -198,6 +198,21 @@ async def main():
     restored = AstrBotConfig(config_path=config_path, default_config={"tools_json": "[]"})
     assert len(json.loads(restored["tools_json"])) == 6
     assert sum(item["enabled"] for item in json.loads(restored["tools_json"])) == 1
+    # Renaming changes the real registered name without a presentation plugin.
+    named = plugin.catalog.snapshot()["items"][-1]
+    named["tool_name"] = "Ninety_retention"
+    previous = plugin.tools[0]
+    plugin.catalog.mutate(
+        "save",
+        {
+            "revision": plugin.catalog.snapshot()["revision"],
+            "original_name": named["name"],
+            "definition": named,
+        },
+    )
+    assert plugin.tools[0].name == "Ninety_retention"
+    assert not previous.available
+    assert plugin.tools[0].definition.request == previous.definition.request
     await plugin.terminate()
     assert manager.func_list == [foreign]
     assert not context.registered_web_apis

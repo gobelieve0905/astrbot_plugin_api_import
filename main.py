@@ -74,7 +74,7 @@ class ApiImportPlugin(Star):
         owned = {id(tool) for tool in self.tools}
         existing = {tool.name for tool in manager.func_list if id(tool) not in owned}
         if any(item.enabled and item.tool_name in existing for item in definitions):
-            raise DefinitionError("存在与其他插件同名的工具，请修改接口 name")
+            raise DefinitionError("存在与其他插件同名的工具，请修改接口调用名称 tool_name")
         return [ImportedTool(item, self.executor) for item in definitions if item.enabled]
 
     def _apply_saved(self, raw, definitions):

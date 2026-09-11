@@ -56,7 +56,7 @@ function operationCard(item) {
   actions.append(actionButton('编辑', () => openEditor(item)), actionButton(item.enabled === false ? '启用' : '停用', () => toggle(item)), actionButton('删除', () => remove(item), 'danger'));
   const heading = el('div', undefined, 'operation-heading'); heading.append(top, actions);
   const details = el('details', undefined, 'operation-details');
-  details.append(el('summary', '接口详情'), el('p', `工具标识：api_${item.name}`, 'hint'), el('p', item.request.url, 'endpoint'), el('p', item.description, 'muted'));
+  details.append(el('summary', '接口详情'), el('p', `调用名称：${state.tool_names?.[item.name] || item.tool_name || `api_${item.name}`}`, 'hint'), el('p', item.request.url, 'endpoint'), el('p', item.description, 'muted'));
   card.append(heading, details); return card;
 }
 function enterAccount(connection) { activeAccount = connection.id; renderList(); }
@@ -214,6 +214,8 @@ function assertFormSupported(value) {
 }
 function renderForm() {
   assertFormSupported(draft);
+  $('tool-name').value = draft.tool_name || '';
+  $('tool-name').placeholder = state.tool_names?.[draft.name] || '留空按自定义名称生成';
   $('display-name').value = draft.display_name || '';
   $('name').value = draft.name || ''; $('description').value = draft.description || ''; $('enabled').checked = draft.enabled !== false;
   $('method').value = draft.request.method || 'GET'; $('url').value = draft.request.url || '';
@@ -235,6 +237,7 @@ function renderForm() {
 }
 function readForm() {
   const value = clone(draft);
+  if ($('tool-name').value.trim()) value.tool_name = $('tool-name').value.trim(); else delete value.tool_name;
   if ($('display-name').value.trim()) value.display_name = $('display-name').value.trim(); else delete value.display_name;
   value.name = $('name').value.trim(); value.description = $('description').value.trim(); value.enabled = $('enabled').checked;
   value.parameters ||= { type: 'object' };

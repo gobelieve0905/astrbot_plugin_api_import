@@ -1,15 +1,18 @@
 """Validate platform-independent API definitions before registering any tool."""
 
 import copy
+import hashlib
 import json
 import re
-from dataclasses import dataclass
+import unicodedata
+from dataclasses import dataclass, replace
 from urllib.parse import urlsplit
 
 from jsonschema import Draft202012Validator
 from jsonschema.exceptions import SchemaError
 
 NAME = re.compile(r"^[a-zA-Z][a-zA-Z0-9_]{0,47}$")
+TOOL_NAME = re.compile(r"^[a-zA-Z][a-zA-Z0-9_]{0,63}$")
 PLACEHOLDER = re.compile(r"\{([a-zA-Z][a-zA-Z0-9_]*)\}")
 
 DEFINITION_SCHEMA = {
@@ -18,6 +21,7 @@ DEFINITION_SCHEMA = {
     "additionalProperties": False,
     "properties": {
         "name": {"type": "string", "pattern": NAME.pattern},
+        "tool_name": {"type": "string", "pattern": TOOL_NAME.pattern},
         "display_name": {"type": "string", "minLength": 1, "maxLength": 80, "pattern": r"\S"},
         "connection": {
             "type": "object",
@@ -75,9 +79,40 @@ class Definition:
     response: dict
     display_name: str = ""
 
-    @property
-    def tool_name(self):
-        return "api_" + self.name
+    tool_name: str = ""
+
+
+def _slug(text, fallback):
+    ascii_text = unicodedata.normalize("NFKD", text).encode("ascii", "ignore").decode()
+    slug = re.sub(r"[^a-zA-Z0-9]+", "_", ascii_text).strip("_") or fallback
+    if not slug[0].isalpha():
+        slug = "api_" + slug
+    # Preserve distinct Unicode names without assuming model support for Unicode identifiers.
+    if any(ord(char) > 127 for char in text):
+        slug += "_" + hashlib.sha256(text.encode()).hexdigest()[:8]
+    return slug
+
+
+def suggested_tool_name(value):
+    if value.get("tool_name"):
+        return value["tool_name"]
+    connection = value.get("connection")
+    if connection:
+        account = _slug(connection["name"], "account")
+        display = value.get("display_name", "")
+        operation = (
+            _slug(display, connection["operation"])
+            if display.isascii() and display
+            else connection["operation"]
+        )
+        text = account + "_" + operation
+    elif value.get("display_name"):
+        text = _slug(value["display_name"], "api")
+    else:
+        text = "api_" + value["name"]
+    if len(text) > 64:
+        text = text[:55] + "_" + hashlib.sha256(text.encode()).hexdigest()[:8]
+    return text
 
 
 def _walk(value):
@@ -194,6 +229,19 @@ def parse_definitions(raw: str) -> list[Definition]:
                 request,
                 copy.deepcopy(value.get("response", {})),
                 display_name,
+                suggested_tool_name(value),
             )
         )
+    counts = {}
+    for item in result:
+        counts[item.tool_name] = counts.get(item.tool_name, 0) + 1
+    used = set()
+    for index, (item, value) in enumerate(zip(result, values, strict=True)):
+        actual = item.tool_name
+        if counts[actual] > 1 and not value.get("tool_name"):
+            actual = actual[:55] + "_" + hashlib.sha256(item.name.encode()).hexdigest()[:8]
+        if actual in used:
+            raise DefinitionError("调用名称重复，请为每个操作设置不同的 tool_name")
+        used.add(actual)
+        result[index] = replace(item, tool_name=actual)
     return result
