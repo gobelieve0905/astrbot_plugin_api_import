@@ -46,6 +46,37 @@ class ConnectionTests(unittest.TestCase):
         unicode_names = Definitions.parse_definitions(json.dumps(self.first + self.second))
         self.assertEqual(len({d.tool_name for d in unicode_names}), len(items))
 
+    def test_existing_advertiser_preset_is_repaired_without_mutating_source(self):
+        item = copy.deepcopy(self.first[0])
+        old = {
+            "type": "array",
+            "items": {"type": "string", "minLength": 1, "pattern": "^[^,]+$"},
+            "minItems": 1,
+            "maxItems": 100,
+            "description": "按 application 精确筛选，多值为 OR；值需符合平台字段定义。",
+        }
+        item["parameters"]["properties"]["filter_application"] = old
+        item["request"]["query"]["filter_application"] = {
+            "$param": "filter_application",
+            "$join": ",",
+        }
+        raw = json.dumps([item])
+        parsed = Definitions.parse_definitions(raw)[0]
+        self.assertNotIn("filter_application", parsed.parameters["properties"])
+        self.assertNotIn("filter_application", parsed.request["query"])
+        self.assertEqual(parsed.request["query"]["api_key"], item["request"]["query"]["api_key"])
+        self.assertEqual(parsed.enabled, item["enabled"])
+        self.assertIn("filter_application", item["parameters"]["properties"])
+        item["parameters"]["properties"]["filter_application"]["description"] = "My custom field"
+        self.assertIn(
+            "filter_application",
+            Definitions.parse_definitions(json.dumps([item]))[0].parameters["properties"],
+        )
+        self.assertIn(
+            "filter_application",
+            Definitions.parse_definitions(json.dumps([self.first[1]]))[0].parameters["properties"],
+        )
+
     def setUp(self):
         self.first = Platforms.build_connection(
             {

@@ -3,11 +3,12 @@
 import asyncio
 import copy
 import json
+import re
 import time
 import uuid
 from collections import deque
 from pathlib import Path
-from urllib.parse import quote
+from urllib.parse import quote, quote_plus
 
 import httpx
 from jsonschema import Draft202012Validator
@@ -79,6 +80,38 @@ def wire_mapping(value, headers=False):
     return result
 
 
+def sanitize_error(text, request):
+    """Bound untrusted diagnostics and remove configured credentials before model delivery."""
+    secrets = []
+    sensitive = re.compile(r"(?i)(key|token|secret|password|authorization|cookie|credential)")
+
+    def collect(value, protected=False):
+        if isinstance(value, dict):
+            for key, child in value.items():
+                collect(child, protected or bool(sensitive.search(key)))
+        elif isinstance(value, list):
+            for child in value:
+                collect(child, protected)
+        elif protected and isinstance(value, str) and value:
+            secrets.extend(
+                [value, quote(value, safe=""), quote_plus(value), json.dumps(value)[1:-1]]
+            )
+
+    collect(request)
+    collect(request.get("headers", {}), True)
+    for secret in sorted(set(secrets), key=len, reverse=True):
+        text = text.replace(secret, "[REDACTED]")
+    text = re.sub(r"https?://[^\s<>]+", "[URL REDACTED]", text)
+    text = re.sub(r'(?i)(bearer\s+)[^\s"<>]+', r"\1[REDACTED]", text)
+    text = re.sub(
+        r'(?i)((?:api[_-]?key|token|secret|password|authorization|cookie)["\s]*[:=]["\s]*)[^\s,"<>;&]+',
+        r"\1[REDACTED]",
+        text,
+    )
+    text = re.sub(r"<[^>]*>", " ", text)
+    return " ".join(text.split())[:2000] or "上游未提供可展示的错误详情"
+
+
 class Executor:
     def __init__(self, data_dir: Path, client=None):
         self.data_dir = Path(data_dir)
@@ -104,7 +137,19 @@ class Executor:
             errors = list(Draft202012Validator(definition.parameters).iter_errors(arguments))
             if errors:
                 path = ".".join(str(x) for x in errors[0].absolute_path) or "参数"
-                raise ExecutionError(f"{path} 不符合 {errors[0].validator} 规则")
+                error = errors[0]
+                if error.validator == "additionalProperties":
+                    raise ExecutionError(
+                        "存在未定义参数；请严格使用工具声明的参数名称，不要自行增加或猜测筛选字段"
+                    )
+                expected = (
+                    error.schema.get("type", "声明类型")
+                    if isinstance(error.schema, dict)
+                    else "声明类型"
+                )
+                raise ExecutionError(
+                    f"{path} 不符合 {error.validator} 规则；期望 {expected}，数组请传 JSON 数组而不是字符串"
+                )
             request = definition.request
 
             def path_value(match):
@@ -153,7 +198,18 @@ class Executor:
                     ) as response:
                         result["status"] = response.status_code
                         if not 200 <= response.status_code < 300:
-                            result["error"] = "HTTP 请求失败；未自动重试，请通过平台确认操作状态"
+                            result["error"] = (
+                                "HTTP 请求失败；未自动重试。请依据 error_detail 修正请求，不要猜测平台维护、账户状态或数据是否存在。"
+                            )
+                            chunks, size = [], 0
+                            async for chunk in response.aiter_bytes():
+                                chunks.append(chunk[: max(0, 8192 - size)])
+                                size += len(chunk)
+                                if size >= 8192:
+                                    break
+                            detail = b"".join(chunks).decode("utf-8", errors="replace")
+                            result["error_detail"] = sanitize_error(detail, request)
+                            result["error_detail_truncated"] = size >= 8192 or len(detail) > 2000
                             return result
                         chunks, size = [], 0
                         async for chunk in response.aiter_bytes():

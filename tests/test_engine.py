@@ -163,12 +163,40 @@ class ExecutorTest(unittest.IsolatedAsyncioTestCase):
     async def test_errors_and_redirects_not_retried(self):
         for status in (302, 401, 429, 500):
             self.response = httpx.Response(
-                status, headers={"Location": "https://other.test"}, text="secret"
+                status, headers={"Location": "https://other.test"}, text="Invalid request"
             )
             result = await self.executor.execute(definition(), {"id": "1"})
             self.assertFalse(result["ok"])
-            self.assertNotIn("secret", json.dumps(result))
+            self.assertEqual(result["error_detail"], "Invalid request")
         self.assertEqual(len(self.calls), 4)
+
+    async def test_http_error_detail_is_bounded_redacted_and_not_saved(self):
+        key = "synthetic+key/only"
+        self.response = httpx.Response(
+            400,
+            text="Invalid Column: application; "
+            + key
+            + " synthetic%2Bkey%2Fonly api_key=other-secret "
+            + "x" * 10000,
+        )
+        item = definition(
+            request={
+                "method": "GET",
+                "url": "https://example.test/report",
+                "query": {"api_key": key},
+            },
+            response={"save": True},
+        )
+        result = await self.executor.execute(item, {"id": "1"})
+        self.assertEqual(result["status"], 400)
+        self.assertIn("Invalid Column: application", result["error_detail"])
+        self.assertNotIn(key, str(result))
+        self.assertNotIn("synthetic%2Bkey%2Fonly", str(result))
+        self.assertNotIn("other-secret", str(result))
+        self.assertLessEqual(len(result["error_detail"]), 2000)
+        self.assertTrue(result["error_detail_truncated"])
+        self.assertEqual(list(Path(self.directory.name).iterdir()), [])
+        self.assertEqual(len(self.calls), 1)
 
     async def test_response_limit_and_missing_pointer(self):
         self.assertFalse(

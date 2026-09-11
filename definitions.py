@@ -134,6 +134,9 @@ def parse_definitions(raw: str) -> list[Definition]:
         raise DefinitionError("tools_json 不是有效 JSON") from exc
     if not isinstance(values, list) or len(values) > 200:
         raise DefinitionError("tools_json 必须是数组，最多 200 个工具")
+    from .platforms import upgrade_advertiser
+
+    values = upgrade_advertiser(values)
     result, names = [], set()
     connections = {}
     for index, value in enumerate(values):

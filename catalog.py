@@ -6,7 +6,7 @@ import json
 
 from .connections import enrich_legacy, update_connection
 from .definitions import DefinitionError, parse_definitions
-from .platforms import build_connection
+from .platforms import build_connection, upgrade_advertiser
 
 
 class ConflictError(DefinitionError):
@@ -24,7 +24,7 @@ class Catalog:
         try:
             definitions = parse_definitions(raw)
             return {
-                "items": enrich_legacy(json.loads(raw)),
+                "items": upgrade_advertiser(enrich_legacy(json.loads(raw))),
                 "revision": revision,
                 "error": None,
                 "tool_names": {item.name: item.tool_name for item in definitions},

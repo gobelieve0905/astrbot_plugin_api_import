@@ -1,6 +1,7 @@
 """Server-owned quick connections; creating definitions never performs network I/O."""
 
 import copy
+import re
 import secrets
 
 from .definitions import DefinitionError
@@ -92,7 +93,9 @@ def _definition(operation, token, suffix, enabled):
         },
     }
     # Common documented filters remain ordinary named parameters, never arbitrary query injection.
-    fields = ["country", "platform", "application"]
+    fields = ["country", "platform"]
+    if operation_id != "advertiser":
+        fields += ["application"]
     if operation_id == "advertiser":
         fields += ["campaign", "campaign_id_external", "campaign_package_name"]
     else:
@@ -107,6 +110,13 @@ def _definition(operation, token, suffix, enabled):
             "maxItems": 100,
             "description": f"按 {field} 精确筛选，多值为 OR；值需符合平台字段定义。",
         }
+    if operation_id == "advertiser":
+        properties["filter_campaign_package_name"]["description"] = (
+            "被推广应用的真实包名或 Bundle ID，使用字符串数组。不要猜测包名；未知时先不加筛选，查询 campaign 和 campaign_package_name 确认。"
+        )
+        properties["filter_campaign"]["description"] = (
+            "广告系列名称精确匹配，使用字符串数组；不是游戏显示名称。"
+        )
     properties["sort_day"] = {
         "type": "string",
         "enum": ["ASC", "DESC"],
@@ -209,3 +219,53 @@ def build_connection(payload, existing):
                     "operation": operation[0],
                 }
             return copy.deepcopy(definitions)
+
+
+def upgrade_advertiser(items):
+    """Repair only recognizable preset fields; keep credentials and custom mappings intact."""
+    items = copy.deepcopy(items)
+    if not isinstance(items, list):
+        return items
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        req = item.get("request", {})
+        if (
+            not isinstance(req, dict)
+            or req.get("url") != BASE + "/report"
+            or req.get("method") != "GET"
+        ):
+            continue
+        query = req.get("query", {})
+        if not isinstance(query, dict) or query.get("report_type") != "advertiser":
+            continue
+        if not re.fullmatch(r"applovin_advertiser_[0-9a-f]{8}", str(item.get("name", ""))):
+            continue
+        params = item.get("parameters", {})
+        props = params.get("properties", {}) if isinstance(params, dict) else {}
+        if not isinstance(props, dict):
+            continue
+        old = props.get("filter_application", {})
+        if (
+            isinstance(old, dict)
+            and "default" not in old
+            and old.get("description")
+            == "按 application 精确筛选，多值为 OR；值需符合平台字段定义。"
+            and query.get("filter_application") == {"$param": "filter_application", "$join": ","}
+            and "filter_application" not in params.get("required", [])
+        ):
+            del props["filter_application"]
+            del query["filter_application"]
+        descriptions = {
+            "filter_campaign_package_name": "被推广应用的真实包名或 Bundle ID，使用字符串数组。不要猜测包名；未知时先不加筛选，查询 campaign 和 campaign_package_name 确认。",
+            "filter_campaign": "广告系列名称精确匹配，使用字符串数组；不是游戏显示名称。",
+        }
+        for key, description in descriptions.items():
+            field = props.get(key)
+            if (
+                isinstance(field, dict)
+                and field.get("description")
+                == f"按 {key[7:]} 精确筛选，多值为 OR；值需符合平台字段定义。"
+            ):
+                field["description"] = description
+    return items
