@@ -4,7 +4,7 @@ const bridge = window.AstrBotPluginPage;
 let state = { items: [], revision: null };
 let draft = {}, originalName = null, editRevision = null, mode = 'form', dirty = false, busy = false;
 let confirmResolve = null;
-let platforms = [], permissionRevision = null;
+let platforms = [], platformLoading = false;
 const blank = () => ({ name: '', description: '', enabled: false, parameters: { type: 'object', properties: {} }, request: { method: 'GET', url: '' } });
 const own = (object, key) => Object.hasOwn(object, key);
 const object = (value) => value !== null && typeof value === 'object' && !Array.isArray(value);
@@ -90,6 +90,7 @@ $('back-accounts').onclick = () => { activeAccount = null; renderList(); };
 function renderList() {
   const accountItems = state.items.filter((item) => item.connection?.id === activeAccount);
   if (activeAccount && !accountItems.length) activeAccount = null;
+  $('page-header').hidden = !!activeAccount;
   $('overview').hidden = !!activeAccount; $('account-page').hidden = !activeAccount;
   if (activeAccount) {
     const connection = accountItems[0].connection;
@@ -433,71 +434,13 @@ async function savePlatform() {
   try {
     await mutate('connect-platform', { revision: editRevision, platform_id: $('platform-select').value, call_name: callName, name: $('platform-name').value, token, enabled_operations });
     dirty = false; $('editor').close(); resetPlatform();
-    notice(`平台已接入，已开启 ${enabled_operations.length} 个操作。可在「调用权限」中随时调整。`);
+    notice(`平台已接入，已开启 ${enabled_operations.length} 个操作。可在「账户设置」中随时调整。`);
   } catch (error) { notice(error.message, true, true); }
   finally { lockEditor(false); }
 }
-function operationGroups(container, records) {
-  container.replaceChildren();
-  const groups = new Map();
-  for (const record of records) {
-    const url = record.definition?.request.url || '';
-    let service;
-    if (record.definition.connection) service = record.definition.connection.name + ' · ' + record.definition.connection.id;
-    else { try { service = new URL(url).origin; } catch { service = '其他接口'; } }
-    const key = service + ' ' + record.method;
-    if (!groups.has(key)) groups.set(key, { service, method: record.method, records: [] });
-    groups.get(key).records.push(record);
-  }
-  for (const group of groups.values()) {
-    const section = el('section', undefined, 'operation-group');
-    const header = el('div', undefined, 'section-head');
-    const all = checkbox(false);
-    const label = labeled(`${group.service} · ${group.method}（${group.records.length} 个操作）`, all);
-    label.className = 'check'; header.append(label); section.append(header);
-    const checkboxes = [];
-    for (const record of group.records) {
-      const row = el('div', undefined, 'operation-row');
-      const control = checkbox(record.definition.enabled !== false);
-      control.dataset.operationName = record.definition?.name || '';
-      const title = labeled(`${record.definition.display_name || record.definition.name} · ${record.method}`, control); title.className = 'check';
-      row.append(title, el('p', record.description || '', 'muted'));
-      if (record.definition) {
-        const details = el('details'); details.append(el('summary', '查看调用参数'));
-        for (const [name, schema] of Object.entries(record.definition.parameters?.properties || {})) {
-          details.append(el('p', `${name} · ${Array.isArray(schema.type) ? schema.type.join(' / ') : schema.type || '复合结构'}${record.definition.parameters.required?.includes(name) ? ' · 必填' : ' · 可选'}${Object.hasOwn(schema, 'default') ? ` · 默认值：${JSON.stringify(schema.default)}` : ''}`, 'hint'));
-          if (schema.description) details.append(el('p', schema.description, 'hint'));
-        }
-        if (!Object.keys(record.definition.parameters?.properties || {}).length) details.append(el('p', '无需模型填写参数', 'hint'));
-        row.append(details);
-      }
-      section.append(row); checkboxes.push(control);
-    }
-    const selectable = checkboxes.filter((control) => !control.disabled);
-    function sync() { all.disabled = !selectable.length; all.checked = selectable.length > 0 && selectable.every((c) => c.checked); all.indeterminate = selectable.some((c) => c.checked) && !all.checked; }
-    all.onchange = () => { for (const control of selectable) control.checked = all.checked; dirty = true; };
-    for (const control of selectable) control.onchange = sync;
-    sync(); container.append(section);
-  }
-}
-$('permissions').onclick = () => {
-  permissionRevision = state.revision; $('permissions-error').hidden = true;
-  operationGroups($('permission-groups'), state.items.map((item) => ({ method: item.request.method, path: item.request.url, description: item.description, definition: item, supported: true })));
-  if (!state.items.length) $('permission-groups').append(el('p', '尚未接入任何操作。请先新增 API。', 'muted'));
-  $('permissions-dialog').showModal();
-};
-$('close-permissions').onclick = $('cancel-permissions').onclick = () => { if (!busy) $('permissions-dialog').close(); };
-$('permissions-dialog').addEventListener('cancel', (event) => { if (busy) event.preventDefault(); });
-$('save-permissions').onclick = async () => {
-  if (busy) return;
-  const enabled_names = [...$('permission-groups').querySelectorAll('input[data-operation-name]:checked')].map((input) => input.dataset.operationName);
-  const controls = [...$('permissions-dialog').querySelectorAll('input,button')];
-  const previous = controls.map((control) => control.disabled); controls.forEach((control) => { control.disabled = true; });
-  try { await mutate('permissions', { revision: permissionRevision, enabled_names }); $('permissions-dialog').close(); notice('调用权限已保存并立即生效。'); }
-  catch (error) { $('permissions-error').textContent = error.message; $('permissions-error').hidden = false; }
-  finally { controls.forEach((control, index) => { control.disabled = previous[index]; }); }
-};
 async function loadPlatforms() {
+  if (platformLoading) return;
+  platformLoading = true; $('retry-platforms').disabled = true; $('platform-load-error').hidden = true;
   try {
     const result = await bridge.apiGet('platforms');
     platforms = result.platforms || [];
@@ -505,8 +448,13 @@ async function loadPlatforms() {
     for (const platform of platforms) { const option = el('option', platform.name); option.value = platform.id; $('platform-select').append(option); }
     renderPlatform(); renderPlatformCards();
     if (mode === 'platform') displayMode(mode);
-  } catch { notice('平台列表加载失败，请刷新重试；仍可使用表单、cURL 或 JSON。', true); }
+  } catch {
+    $('platform-load-error').hidden = false;
+    if (!platforms.length) $('platform-cards').replaceChildren();
+  } finally { platformLoading = false; $('retry-platforms').disabled = false; }
 }
+
+$('retry-platforms').onclick = loadPlatforms;
 
 try {
   if (!bridge) throw new Error('请从 AstrBot 插件详情中的「API 管理」打开此页面。');

@@ -223,11 +223,14 @@ def run():
         page.locator("#method-filter").select_option("PATCH")
         assert page.locator(".card").count() == 1
         page.locator("#method-filter").select_option("")
-        page.locator("#permissions").click()
+        assert page.locator("#permissions").count() == 0
+        page.locator(".connection-card").first.get_by_role("button", name="进入账户").click()
+        page.locator("#account-settings").click()
         advertiser = incoming[0]["name"]
         page.locator(f'[data-operation-name="{advertiser}"]').uncheck()
-        page.locator("#save-permissions").click()
-        page.locator("#permissions-dialog").wait_for(state="hidden")
+        page.locator("#save-connection").click()
+        page.locator("#connection-editor").wait_for(state="hidden")
+        page.locator("#back-accounts").click()
         assert sum(item["enabled"] for item in catalog.snapshot()["items"][before:]) == 1
         assert catalog.snapshot()["items"][-1]["enabled"]
         # Additional accounts do not collide, and all-off onboarding remains possible.
@@ -311,6 +314,16 @@ def run():
         page.locator('[data-add-map="query"]').click()
         assert page.locator("#editor").evaluate("(node) => node.scrollWidth <= node.clientWidth")
         page.screenshot(path=str(output / "form-mobile.png"))
+        # A platform fetch failure stays local to onboarding and can recover in place.
+        page.route("**/fixture/platforms", lambda route: route.abort())
+        page.reload()
+        page.locator("#add").click()
+        page.locator("#platform-load-error").wait_for(state="visible")
+        assert page.locator("#notice.error").count() == 0
+        page.unroute("**/fixture/platforms")
+        page.locator("#retry-platforms").click()
+        page.locator("#platform-cards .integration-card").wait_for()
+        assert page.locator("#platform-load-error").is_hidden()
         assert not errors, errors
         browser.close()
     server.shutdown()
