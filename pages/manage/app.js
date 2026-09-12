@@ -9,11 +9,16 @@ const blank = () => ({ name: '', description: '', enabled: false, parameters: { 
 const own = (object, key) => Object.hasOwn(object, key);
 const object = (value) => value !== null && typeof value === 'object' && !Array.isArray(value);
 
+const noticeTimers = new WeakMap();
 function notice(message, error = false, editor = false) {
   const box = $(editor ? 'editor-error' : 'notice');
+  clearTimeout(noticeTimers.get(box));
   box.textContent = message;
   box.classList.toggle('error', error);
   box.hidden = !message;
+  if (message && !error && !editor) {
+    noticeTimers.set(box, setTimeout(() => { box.hidden = true; box.textContent = ''; }, 4000));
+  }
 }
 function el(tag, text, className) {
   const node = document.createElement(tag);
@@ -98,7 +103,7 @@ function renderList() {
     const all = state.items.filter((item) => item.connection?.id === connection.id);
     const card = el('section', undefined, 'connection-card'); card.dataset.connectionId = connection.id;
     const header = el('div', undefined, 'connection-header');
-    const heading = el('div'); heading.append(el('h2', connection.name), el('p', `AppLovin Report · ${all.length} 个操作 · ${all.filter((item) => item.enabled !== false).length} 个启用`, 'muted'));
+    const heading = el('div'); heading.append(el('h2', connection.name), el('p', `${all.length} 个操作 · ${all.filter((item) => item.enabled !== false).length} 个启用`, 'muted'));
     const actions = el('div', undefined, 'card-actions'); actions.append(actionButton('进入账户', () => enterAccount(connection)), actionButton('删除接入', () => deleteConnection(connection), 'danger'));
     const brand = el('div', undefined, 'integration-head'); brand.append(el('strong', 'AppLovin Report'), el('span', all.some((item) => item.enabled !== false) ? '● 已启用' : '未启用', 'badge'));
     heading.className = 'integration-body';
@@ -273,6 +278,9 @@ function readJSON() { let value; try { value = JSON.parse($('json-text').value);
 function bodyVisibility() { const kind = $('body-kind').value; $('body-fields').hidden = !['json', 'form'].includes(kind); $('body-raw-label').hidden = kind !== 'raw'; }
 function displayMode(next) {
   mode = next;
+  const market = next === 'platform' && $('platform-setup').hidden;
+  $('editor').classList.toggle('market-mode', market);
+  $('save').hidden = market;
   for (const key of ['platform', 'form', 'curl', 'json']) { $(`panel-${key}`).hidden = key !== next; $(`tab-${key}`).setAttribute('aria-selected', String(key === next)); }
   $('save').disabled = next === 'curl' || (next === 'platform' && ($('platform-setup').hidden || !platforms.some((item) => item.id === $('platform-select').value)));
   $('save').textContent = next === 'platform' ? '保存接入与权限' : '保存并生效';
@@ -354,7 +362,7 @@ function renderPlatformCards() {
   const cards = platforms.filter((p) => p.name.toLowerCase().includes(term)).map((platform) => {
     const card = el('article', undefined, 'integration-card');
     const head = el('div', undefined, 'integration-head'); head.append(el('strong', platform.name), el('span', '可接入', 'badge'));
-    const body = el('div', undefined, 'integration-body'); body.append(el('h3', platform.name), el('p', '报表 API', 'muted'), el('p', `${platform.operations.length} 个操作 · 按账户独立管理`, 'hint'));
+    const body = el('div', undefined, 'integration-body'); body.append(el('p', '广告投放、收益与用户表现报表', 'muted'), el('p', `${platform.operations.length} 个操作 · 独立账户与权限`, 'hint'));
     const footer = el('div', undefined, 'integration-actions'); footer.append(actionButton('添加账户', () => {
       $('platform-select').value = platform.id; $('platform-market').hidden = true; $('platform-setup').hidden = false;
       $('platform-setup-title').textContent = platform.name; renderPlatform(); updatePlatformPreview(); displayMode('platform');

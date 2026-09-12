@@ -189,6 +189,10 @@ def run():
         page.locator("#cancel").click()
         page.locator("#confirm-yes").click()
         page.locator("#editor").wait_for(state="hidden")
+        # Success feedback expires without moving the page; errors remain visible.
+        page.locator("#refresh").click()
+        page.locator("#notice").wait_for(state="visible")
+        page.locator("#notice").wait_for(state="hidden", timeout=6000)
         # Presets require only the token and independent operation switches, including same-method operations.
         page.locator("#add").click()
         assert page.locator("#panel-platform").is_visible()

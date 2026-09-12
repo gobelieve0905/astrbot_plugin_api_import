@@ -19,3 +19,29 @@ main{max-width:1380px}.toolbar{flex-wrap:wrap}.toolbar #count{font-size:12px}.co
 .integration-grid,#list{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(280px,100%),1fr));gap:20px}.integration-card,.connection-card{border:1px solid var(--line);border-radius:10px;background:var(--surface);overflow:hidden;margin:0}.integration-head{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:18px;background:var(--bg);border-bottom:1px solid var(--line)}.integration-body{padding:20px;min-height:135px}.integration-body .hint{margin-top:28px}.integration-actions{border-top:1px solid var(--line);padding:14px 18px;display:flex;justify-content:flex-end}.platform-search{max-width:360px;margin:20px 0}.connection-header{display:flex;flex-direction:column;align-items:stretch;padding:0;gap:0;height:100%}.connection-header>div:first-child{padding:22px;flex:1;background:var(--bg)}.connection-header .card-actions{border-top:1px solid var(--line);padding:14px;justify-content:flex-end;align-self:stretch}.connection-header h2{font-size:17px;margin-bottom:10px}#list>.empty,#list>.operation-card{grid-column:1/-1}#platform-setup>h3{font-size:22px;margin:18px 0}#platform-market>h3{font-size:22px}#platform-name-preview{overflow-wrap:anywhere}#platform-market{min-height:340px}
 
 .connection-header>.integration-head{padding:16px 20px;flex:0}.connection-header>.integration-body{padding:20px;flex:1}.connection-header>.integration-body h2{margin:0 0 8px}.connection-header>.integration-body .muted{font-size:12px}
+
+/* Compact management layout and transient feedback. */
+main{max-width:1240px;padding:30px 28px}header{margin-bottom:24px}
+.toolbar{gap:12px;padding:12px 14px;border-radius:10px}.toolbar .search input{background:var(--bg);margin:0}
+#list,.integration-grid{gap:16px;align-items:start}
+.integration-card,.connection-card{border-radius:12px;box-shadow:0 2px 8px #14233305;transition:border-color .15s,box-shadow .15s}
+.integration-card:hover,.connection-card:hover{border-color:var(--brand);box-shadow:0 4px 16px #1423330a}
+.integration-head,.connection-header>.integration-head{padding:14px 18px;background:var(--surface)}
+.integration-head strong{font-size:14px}.integration-head .badge{white-space:nowrap;border-radius:20px;padding:3px 8px}
+.integration-body,.connection-header>.integration-body{padding:16px 18px;min-height:82px}
+.integration-body .hint{margin:12px 0 0}.connection-header>.integration-body h2{font-size:17px;line-height:1.45;margin-bottom:8px}
+.integration-actions,.connection-header .card-actions{padding:10px 16px;background:var(--bg)}
+.connection-header .card-actions button.danger{border-color:transparent;background:transparent}
+.connection-header .card-actions button.danger:hover{background:var(--error-bg)}
+#editor.market-mode{width:min(780px,calc(100vw - 32px))}#platform-market{min-height:0;padding-bottom:4px}
+#platform-market>h3{font-size:19px}.platform-search{max-width:none;margin:18px 0 16px}.platform-search input{background:var(--bg)}
+#account-operation-list{border:1px solid var(--line);border-radius:12px;overflow:hidden;background:var(--surface);margin-top:12px}
+#account-operation-list .operation-card{border:0;border-bottom:1px solid var(--line);border-radius:0;margin:0;padding:14px 18px}
+#account-operation-list .operation-card:last-child{border-bottom:0}
+#account-operation-list .operation-card:hover{background:var(--bg)}
+.operation-card .method{font-size:11px;padding:2px 7px;border-radius:5px;background:var(--brand-soft);margin:0}
+.operation-card .card-top{flex-wrap:wrap;gap:8px}.operation-details summary{margin-top:6px}
+.operation-details[open]{padding-top:4px}.operation-details[open] p{margin:8px 0}
+.account-page-head{margin:18px 0}.account-page-head h2{font-size:22px}
+#notice:not(.error){position:fixed;z-index:20;top:20px;right:24px;width:max-content;max-width:min(520px,calc(100vw - 32px));margin:0;box-shadow:0 8px 28px #14233320;padding:12px 18px;border-radius:10px}
+@media(max-width:640px){main{padding:24px 16px}.operation-heading{gap:8px}#account-operation-list .operation-card{padding:12px 14px}.connection-header{padding:0}.connection-header .card-actions{margin-left:0}#notice:not(.error){top:12px;right:16px}.integration-grid,#list{grid-template-columns:1fr}.account-page-head{gap:10px}}
