@@ -23,12 +23,16 @@
  <div id="editor-error" class="notice error" role="alert" hidden></div>
  <div class="dialog-body">
   <section id="panel-platform" role="tabpanel" hidden>
-   <h3>选择平台，填写 Token</h3><p class="muted">接口地址和请求参数已预设，选择允许调用的操作即可接入。</p>
-   <label>接入名称<input id="platform-name" maxlength="80" placeholder="例如 AppLovin 国内账户、AppLovin 海外账户（可选）"></label>
-   <label>平台<select id="platform-select"><option value="">正在加载平台…</option></select></label>
+   <div id="platform-market"><h3>平台快速接入</h3><p class="muted">选择平台，添加独立账户并管理允许调用的操作。</p><label class="platform-search">搜索平台<input id="platform-search" type="search" placeholder="搜索平台名称"></label><div id="platform-cards" class="integration-grid"></div></div>
+   <div id="platform-setup" hidden><button id="back-platforms" type="button">← 返回平台列表</button><h3 id="platform-setup-title">接入平台</h3>
+   <div class="grid"><label>自定义名称<input id="platform-name" maxlength="80" placeholder="例如 国内投放账户（仅后台显示）"></label>
+   <label>调用名称<input id="platform-call-name" maxlength="40" pattern="[A-Za-z][A-Za-z_]{0,39}" placeholder="例如 Ninety_Report" required><small>仅英文字母和下划线，英文开头；工具名自动追加操作名。</small></label></div>
+   <p id="platform-name-preview" class="hint"></p>
+   <label hidden>平台<select id="platform-select"><option value="">正在加载平台…</option></select></label>
    <p id="platform-description" class="hint"></p>
    <label><span id="platform-token-label">Token</span><input id="platform-token" type="password" autocomplete="off" placeholder="填写平台 Report Key" required></label>
    <div class="form-section"><h3>允许调用的操作</h3><p class="hint">默认全部关闭，可逐项开启；保存后也可在「调用权限」中调整。</p><div id="platform-operations"></div></div>
+   </div>
   </section>
   <section id="panel-curl" role="tabpanel" hidden><h3>从请求示例开始</h3><p class="muted">粘贴一条 cURL，解析为草稿后继续填写用途和参数。解析不会执行请求。</p><label>cURL 命令<textarea id="curl-text" rows="10" spellcheck="false" placeholder="curl 'https://api.example.com/items?limit=20'"></textarea></label><button id="parse-curl" class="primary">解析为表单草稿</button><p class="hint">支持 URL、请求方法、Header、JSON 与表单。不执行 shell，不读取本地文件；暂不支持的选项会明确提示。</p></section>
   <section id="panel-json" role="tabpanel" hidden><p class="muted">填写单个接口定义对象。适合复制现有配置，或编辑复杂 JSON Schema。</p><label>接口 JSON<textarea id="json-text" rows="22" spellcheck="false"></textarea></label></section>
@@ -55,7 +59,8 @@
 <dialog id="connection-editor" aria-labelledby="connection-title">
  <div class="dialog-head"><div><p class="eyebrow">接入账户</p><h2 id="connection-title">管理接入</h2></div><button id="close-connection" aria-label="关闭接入管理">✕</button></div>
  <div class="dialog-body"><div id="connection-error" class="notice error" role="alert" hidden></div>
-  <label>接入名称<input id="connection-name" maxlength="80" required placeholder="例如 AppLovin 海外账户"></label>
+  <label>自定义名称（仅后台显示）<input id="connection-name" maxlength="80" required placeholder="例如 AppLovin 海外账户"></label>
+  <label>调用名称<input id="connection-call-name" maxlength="40" pattern="[A-Za-z][A-Za-z_]{0,39}" placeholder="留空保留旧调用名；填写可统一设置账户调用前缀"><small>仅英文字母和下划线，英文开头；自动追加操作名。</small></label>
   <label>更换 Token<input id="connection-token" type="password" autocomplete="off" placeholder="留空保留原 Token；填写后更新此账户下所有操作"></label>
   <h3>操作权限</h3><p class="hint">只影响当前账户，各操作可独立开启或关闭。</p><div id="connection-operations"></div>
  </div>

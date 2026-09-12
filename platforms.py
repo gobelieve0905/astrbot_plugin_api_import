@@ -185,6 +185,11 @@ def build_connection(payload, existing):
     display_name = payload.get("name", "")
     if not isinstance(display_name, str) or len(display_name.strip()) > 80:
         raise DefinitionError("接入名称最多 80 个字符")
+    call_name = payload.get("call_name")
+    if call_name is not None and (
+        not isinstance(call_name, str) or not re.fullmatch(r"[A-Za-z][A-Za-z_]{0,39}", call_name)
+    ):
+        raise DefinitionError("调用名称须为 1–40 位英文字母或下划线，并以英文字母开头")
     token = payload.get("token")
     if (
         not isinstance(token, str)
@@ -218,6 +223,9 @@ def build_connection(payload, existing):
                     "platform": "applovin_report",
                     "operation": operation[0],
                 }
+            if call_name:
+                for item in definitions:
+                    item["connection"]["call_name"] = call_name
             return copy.deepcopy(definitions)
 
 

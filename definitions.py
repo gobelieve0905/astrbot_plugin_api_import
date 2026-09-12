@@ -32,6 +32,7 @@ DEFINITION_SCHEMA = {
                 "name": {"type": "string", "minLength": 1, "maxLength": 80, "pattern": r"\S"},
                 "platform": {"type": "string", "pattern": NAME.pattern},
                 "operation": {"type": "string", "pattern": NAME.pattern},
+                "call_name": {"type": "string", "pattern": "^[A-Za-z][A-Za-z_]{0,39}$"},
             },
         },
         "description": {"type": "string", "minLength": 1, "maxLength": 4000},
@@ -94,6 +95,8 @@ def _slug(text, fallback):
 
 
 def suggested_tool_name(value):
+    if value.get("connection", {}).get("call_name"):
+        return value["connection"]["call_name"] + "_" + value["connection"]["operation"]
     if value.get("tool_name"):
         return value["tool_name"]
     connection = value.get("connection")
@@ -213,16 +216,16 @@ def parse_definitions(raw: str) -> list[Definition]:
                         raise DefinitionError(f"{prefix}.{field}: $param 必须单独引用已定义参数")
         display_name = value.get("display_name") or "api_" + name
         description = value["description"]
-        if value.get("display_name"):
+        if value.get("display_name") and not value.get("connection"):
             description = value["display_name"] + "。" + description
         if connection := value.get("connection"):
-            identity = (connection["name"], connection["platform"])
+            identity = (connection["name"], connection["platform"], connection.get("call_name"))
             previous, operations = connections.setdefault(connection["id"], (identity, set()))
             if previous != identity or connection["operation"] in operations:
                 raise DefinitionError(f"{prefix}: 同一接入账户的名称、平台或操作标识不一致")
             operations.add(connection["operation"])
             display_name = connection["name"] + " / " + display_name
-            description = "接入账户：" + connection["name"] + "。" + description
+
         result.append(
             Definition(
                 name,
@@ -241,10 +244,20 @@ def parse_definitions(raw: str) -> list[Definition]:
     used = set()
     for index, (item, value) in enumerate(zip(result, values, strict=True)):
         actual = item.tool_name
-        if counts[actual] > 1 and not value.get("tool_name"):
+        if (
+            counts[actual] > 1
+            and not value.get("tool_name")
+            and not value.get("connection", {}).get("call_name")
+        ):
             actual = actual[:55] + "_" + hashlib.sha256(item.name.encode()).hexdigest()[:8]
+        if not TOOL_NAME.fullmatch(actual):
+            raise DefinitionError("完整调用名称超过限制，请缩短账户调用名称或操作标识")
         if actual in used:
             raise DefinitionError("调用名称重复，请为每个操作设置不同的 tool_name")
         used.add(actual)
-        result[index] = replace(item, tool_name=actual)
+        result[index] = replace(
+            item,
+            tool_name=actual,
+            display_name=actual if value.get("connection") else item.display_name,
+        )
     return result

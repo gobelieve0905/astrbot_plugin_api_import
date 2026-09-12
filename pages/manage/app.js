@@ -100,13 +100,16 @@ function renderList() {
     const header = el('div', undefined, 'connection-header');
     const heading = el('div'); heading.append(el('h2', connection.name), el('p', `AppLovin Report · ${all.length} 个操作 · ${all.filter((item) => item.enabled !== false).length} 个启用`, 'muted'));
     const actions = el('div', undefined, 'card-actions'); actions.append(actionButton('进入账户', () => enterAccount(connection)), actionButton('删除接入', () => deleteConnection(connection), 'danger'));
-    header.append(heading, actions);
+    const brand = el('div', undefined, 'integration-head'); brand.append(el('strong', 'AppLovin Report'), el('span', all.some((item) => item.enabled !== false) ? '● 已启用' : '未启用', 'badge'));
+    heading.className = 'integration-body';
+    header.append(brand, heading, actions);
     card.append(header); list.append(card);
   }
 }
 let connectionDraft = null, connectionRevision = null, connectionDirty = false;
 function openConnection(connection) {
   connectionDraft = connection; connectionRevision = state.revision; connectionDirty = false;
+  $('connection-call-name').value = connection.call_name || '';
   $('connection-name').value = connection.name; $('connection-token').value = ''; $('connection-error').hidden = true;
   $('connection-operations').replaceChildren();
   for (const item of state.items.filter((value) => value.connection?.id === connection.id)) {
@@ -128,7 +131,9 @@ $('save-connection').onclick = async () => {
   if (busy || !connectionDraft) return;
   const controls = [...$('connection-editor').querySelectorAll('button,input')]; controls.forEach((node) => node.disabled = true);
   try {
-    await mutate('update-connection', { revision: connectionRevision, connection_id: connectionDraft.id, name: $('connection-name').value, token: $('connection-token').value, enabled_names: [...$('connection-operations').querySelectorAll('input:checked')].map((node) => node.dataset.operationName) });
+    const callName = $('connection-call-name').value.trim();
+    if (callName && !/^[A-Za-z][A-Za-z_]{0,39}$/.test(callName)) throw new Error('调用名称仅允许英文字母和下划线，英文开头，最多 40 位');
+    await mutate('update-connection', { revision: connectionRevision, connection_id: connectionDraft.id, ...(callName ? { call_name: callName } : {}), name: $('connection-name').value, token: $('connection-token').value, enabled_names: [...$('connection-operations').querySelectorAll('input:checked')].map((node) => node.dataset.operationName) });
     connectionDirty = false; $('connection-editor').close(); $('connection-token').value = ''; notice('接入名称、Token 和操作权限已保存。');
   } catch (error) { $('connection-error').textContent = error.message; $('connection-error').hidden = false; }
   finally { controls.forEach((node) => node.disabled = false); }
@@ -214,7 +219,8 @@ function assertFormSupported(value) {
 }
 function renderForm() {
   assertFormSupported(draft);
-  $('tool-name').value = draft.tool_name || '';
+  $('tool-name').readOnly = !!draft.connection?.call_name;
+  $('tool-name').value = draft.connection?.call_name ? `${draft.connection.call_name}_${draft.connection.operation}` : draft.tool_name || '';
   $('tool-name').placeholder = state.tool_names?.[draft.name] || '留空按自定义名称生成';
   $('display-name').value = draft.display_name || '';
   $('name').value = draft.name || ''; $('description').value = draft.description || ''; $('enabled').checked = draft.enabled !== false;
@@ -268,7 +274,7 @@ function bodyVisibility() { const kind = $('body-kind').value; $('body-fields').
 function displayMode(next) {
   mode = next;
   for (const key of ['platform', 'form', 'curl', 'json']) { $(`panel-${key}`).hidden = key !== next; $(`tab-${key}`).setAttribute('aria-selected', String(key === next)); }
-  $('save').disabled = next === 'curl' || (next === 'platform' && !platforms.some((item) => item.id === $('platform-select').value));
+  $('save').disabled = next === 'curl' || (next === 'platform' && ($('platform-setup').hidden || !platforms.some((item) => item.id === $('platform-select').value)));
   $('save').textContent = next === 'platform' ? '保存接入与权限' : '保存并生效';
 }
 function switchMode(next) {
@@ -343,7 +349,31 @@ $('parse-curl').onclick = async () => {
   catch (error) { notice(error.message, true, true); }
   finally { $('parse-curl').disabled = false; }
 };
+function renderPlatformCards() {
+  const term = $('platform-search').value.trim().toLowerCase();
+  const cards = platforms.filter((p) => p.name.toLowerCase().includes(term)).map((platform) => {
+    const card = el('article', undefined, 'integration-card');
+    const head = el('div', undefined, 'integration-head'); head.append(el('strong', platform.name), el('span', '可接入', 'badge'));
+    const body = el('div', undefined, 'integration-body'); body.append(el('h3', platform.name), el('p', '报表 API', 'muted'), el('p', `${platform.operations.length} 个操作 · 按账户独立管理`, 'hint'));
+    const footer = el('div', undefined, 'integration-actions'); footer.append(actionButton('添加账户', () => {
+      $('platform-select').value = platform.id; $('platform-market').hidden = true; $('platform-setup').hidden = false;
+      $('platform-setup-title').textContent = platform.name; renderPlatform(); updatePlatformPreview(); displayMode('platform');
+    }, 'primary'));
+    card.append(head, body, footer); return card;
+  });
+  $('platform-cards').replaceChildren(...cards);
+  if (!cards.length) $('platform-cards').append(el('p', platforms.length ? '没有匹配的平台' : '正在加载平台…', 'muted'));
+}
+function updatePlatformPreview() {
+  const platform = platforms.find((p) => p.id === $('platform-select').value);
+  $('platform-name-preview').textContent = `调用示例：${$('platform-call-name').value.trim() || 'Ninety_Report'}_${platform?.operations[0]?.id || 'operation'}`;
+}
+$('platform-call-name').oninput = updatePlatformPreview;
+$('platform-search').oninput = renderPlatformCards;
+$('back-platforms').onclick = () => { $('platform-setup').hidden = true; $('platform-market').hidden = false; displayMode('platform'); };
 function resetPlatform() {
+  $('platform-call-name').value = ''; $('platform-setup').hidden = true; $('platform-market').hidden = false; $('platform-search').value = '';
+  renderPlatformCards();
   $('platform-token').value = ''; $('platform-name').value = '';
   renderPlatform();
 }
@@ -365,12 +395,14 @@ $('platform-token').oninput = () => notice('', false, true);
 $('platform-select').onchange = () => { $('platform-token').value = ''; renderPlatform(); displayMode(mode); };
 async function savePlatform() {
   notice('', false, true);
+  const callName = $('platform-call-name').value.trim();
+  if (!/^[A-Za-z][A-Za-z_]{0,39}$/.test(callName)) { notice('请填写调用名称：仅英文字母和下划线，英文开头，最多 40 位', true, true); return; }
   const token = $('platform-token').value;
   if (!token.trim()) { notice('请填写 Report Key / Token', true, true); return; }
   const enabled_operations = [...$('platform-operations').querySelectorAll('input:checked')].map((control) => control.dataset.operationId);
   lockEditor(true);
   try {
-    await mutate('connect-platform', { revision: editRevision, platform_id: $('platform-select').value, name: $('platform-name').value, token, enabled_operations });
+    await mutate('connect-platform', { revision: editRevision, platform_id: $('platform-select').value, call_name: callName, name: $('platform-name').value, token, enabled_operations });
     dirty = false; $('editor').close(); resetPlatform();
     notice(`平台已接入，已开启 ${enabled_operations.length} 个操作。可在「调用权限」中随时调整。`);
   } catch (error) { notice(error.message, true, true); }
@@ -442,7 +474,7 @@ async function loadPlatforms() {
     platforms = result.platforms || [];
     $('platform-select').replaceChildren();
     for (const platform of platforms) { const option = el('option', platform.name); option.value = platform.id; $('platform-select').append(option); }
-    renderPlatform();
+    renderPlatform(); renderPlatformCards();
     if (mode === 'platform') displayMode(mode);
   } catch { notice('平台列表加载失败，请刷新重试；仍可使用表单、cURL 或 JSON。', true); }
 }

@@ -180,8 +180,8 @@ async def main():
         },
     )
     assert renamed_connection.status_code == 200
-    assert "接入账户：验收账户" in plugin.tools[0].description
-    assert plugin.tools[0].display_name.startswith("验收账户 / ")
+    assert "验收账户" not in plugin.tools[0].description
+    assert plugin.tools[0].display_name == plugin.tools[0].name
     assert not hasattr(plugin.tools[0], "result_status_format")
     assert not cached_before_rename.available
     cached = plugin.tools[0]

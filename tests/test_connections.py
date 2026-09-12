@@ -77,6 +77,56 @@ class ConnectionTests(unittest.TestCase):
             Definitions.parse_definitions(json.dumps([self.first[1]]))[0].parameters["properties"],
         )
 
+    def test_separate_backend_name_and_runtime_prefix(self):
+        items = Platforms.build_connection(
+            {
+                "platform_id": "applovin_report",
+                "name": "仅后台的中文名称",
+                "call_name": "Ninety_Report",
+                "token": "synthetic",
+                "enabled_operations": ["advertiser"],
+            },
+            [],
+        )
+        parsed = Definitions.parse_definitions(json.dumps(items))
+        self.assertEqual(parsed[0].tool_name, "Ninety_Report_advertiser")
+        self.assertEqual(parsed[0].display_name, parsed[0].tool_name)
+        self.assertNotIn("仅后台的中文名称", parsed[0].description)
+        for item in items:
+            item["connection"]["name"] = "另一个中文名称"
+        self.assertEqual(
+            Definitions.parse_definitions(json.dumps(items))[0].tool_name, parsed[0].tool_name
+        )
+        updated = Connections.update_connection(
+            copy.deepcopy(items),
+            {
+                "connection_id": items[0]["connection"]["id"],
+                "name": "后台再次改名",
+                "call_name": "Primary_Report",
+                "enabled_names": [items[0]["name"]],
+            },
+        )
+        changed = Definitions.parse_definitions(json.dumps(updated))
+        self.assertEqual(changed[0].tool_name, "Primary_Report_advertiser")
+        self.assertEqual(changed[0].request, parsed[0].request)
+        self.assertEqual(changed[0].display_name, changed[0].tool_name)
+        duplicate = copy.deepcopy(items[0])
+        duplicate["name"] += "_copy"
+        duplicate["connection"]["id"] += "copy"
+        with self.assertRaises(Definitions.DefinitionError):
+            Definitions.parse_definitions(json.dumps(items + [duplicate]))
+        for invalid in ["中文", "Name2", "bad-name", "has space", "_Name", "A" * 41]:
+            with self.assertRaises(Definitions.DefinitionError):
+                Platforms.build_connection(
+                    {
+                        "platform_id": "applovin_report",
+                        "call_name": invalid,
+                        "token": "synthetic",
+                        "enabled_operations": [],
+                    },
+                    [],
+                )
+
     def setUp(self):
         self.first = Platforms.build_connection(
             {
@@ -123,8 +173,8 @@ class ConnectionTests(unittest.TestCase):
             self.assertEqual(item["request"]["query"]["api_key"], "rotated-key")
             self.assertEqual(item["enabled"], item["name"] == self.first[1]["name"])
         parsed = Definitions.parse_definitions(self.config["tools_json"])
-        self.assertIn("接入账户：新名称", parsed[0].description)
-        self.assertIn("接入账户：海外账户", parsed[6].description)
+        self.assertNotIn("新名称", parsed[0].description)
+        self.assertNotIn("海外账户", parsed[6].description)
         self.assertEqual([item.name for item in parsed][:6], [item["name"] for item in self.first])
         self.change()
         self.assertEqual(

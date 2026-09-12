@@ -193,12 +193,14 @@ def run():
         page.locator("#add").click()
         assert page.locator("#panel-platform").is_visible()
         assert page.locator("#tab-auto").count() == 0
-        page.locator("#platform-select").select_option("applovin_report")
+        page.screenshot(path=str(output / "platform-market.png"), animations="disabled")
+        page.locator("#platform-cards").get_by_role("button", name="添加账户").click()
         assert page.locator("#platform-operations .operation-row").count() == 6
         assert page.locator("#platform-operations input:checked").count() == 0
         page.locator("#save").click()
         assert page.locator("#editor-error").is_visible()
         page.locator("#platform-name").fill("国内投放账户")
+        page.locator("#platform-call-name").fill("Ninety_Report")
         page.locator("#platform-token").fill("synthetic-key")
         page.locator('[data-operation-id="advertiser"]').check()
         page.locator('[data-operation-id="cohort_sessions"]').check()
@@ -211,6 +213,7 @@ def run():
 
         page.locator("#editor").wait_for(state="hidden")
         incoming = catalog.snapshot()["items"][before:]
+        assert catalog.snapshot()["tool_names"][incoming[0]["name"]] == "Ninety_Report_advertiser"
         assert len(incoming) == 6 and sum(item["enabled"] for item in incoming) == 2
         assert page.locator("#platform-token").input_value() == ""
         page.locator("#method-filter").select_option("PATCH")
@@ -225,7 +228,9 @@ def run():
         assert catalog.snapshot()["items"][-1]["enabled"]
         # Additional accounts do not collide, and all-off onboarding remains possible.
         page.locator("#add").click()
+        page.locator("#platform-cards").get_by_role("button", name="添加账户").click()
         page.locator("#platform-name").fill("海外投放账户")
+        page.locator("#platform-call-name").fill("Overseas_Report")
         page.locator("#platform-token").fill("second-synthetic-key")
         page.locator("#save").click()
         page.locator("#editor").wait_for(state="hidden")
