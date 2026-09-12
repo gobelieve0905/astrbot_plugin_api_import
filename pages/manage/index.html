@@ -13,7 +13,7 @@
   <section id="account-page" hidden aria-label="API 账户详情">
    <button id="back-accounts">← 返回账户列表</button>
    <div class="account-page-head"><div><h2 id="account-page-title"></h2><p id="account-page-count" class="muted"></p></div><div class="card-actions"><button id="account-settings">账户设置</button><button id="account-delete" class="danger">删除接入</button></div></div>
-   <h3>账户操作</h3><p class="hint">在这里编辑、启停和删除当前账户的操作。</p><div id="account-operation-list"></div>
+   <h3>账户操作</h3><p class="hint">在这里编辑、启停和删除当前账户的操作。</p><div class="operation-toolbar"><label>搜索操作<input id="operation-search" type="search" placeholder="操作名称、调用名称、地址或用途"></label><label>状态<select id="operation-status"><option value="">全部状态</option><option value="enabled">已启用</option><option value="disabled">已停用</option></select></label><label>请求方法<select id="operation-method"><option value="">全部方法</option><option>GET</option><option>POST</option><option>PUT</option><option>PATCH</option><option>DELETE</option><option>HEAD</option><option>OPTIONS</option></select></label><button id="clear-operation-filters">清除筛选</button></div><p id="operation-count" class="hint" role="status" aria-live="polite"></p><div id="account-operation-list"></div>
   </section>
   <footer>保存后立即生效 · 接口定义与原插件配置同步</footer>
 </main>

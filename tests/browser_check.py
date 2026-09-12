@@ -117,7 +117,7 @@ def run():
         assert item["parameters"]["required"] == ["collection_id"]
         assert item["request"]["query"]["limit"] == 20
         page.get_by_role("button", name="停用", exact=True).click()
-        page.get_by_text("已停用", exact=True).wait_for()
+        page.locator(".badge.off").first.wait_for()
         # JSON source retains complex nested constraints through the form editor.
         page.locator("#add").click()
         page.locator("#tab-json").click()
@@ -247,6 +247,17 @@ def run():
         assert page.locator("#overview .connection-details").count() == 0
         first_card.get_by_role("button", name="进入账户").click()
         assert page.locator("#overview").is_hidden()
+        assert page.locator("#account-operation-list .operation-card").count() == 6
+        page.locator("#operation-search").fill("Ninety_Report_ADVERTISER")
+        assert page.locator("#account-operation-list .operation-card").count() == 1
+        page.locator("#operation-status").select_option("enabled")
+        assert page.locator("#account-operation-list .operation-card").count() == 0
+        page.locator("#clear-operation-filters").click()
+        page.locator("#operation-search").fill("收益")
+        assert page.locator("#account-operation-list .operation-card").count() == 2
+        page.locator("#operation-method").select_option("POST")
+        assert page.locator("#account-operation-list .operation-card").count() == 0
+        page.get_by_role("button", name="查看全部操作", exact=True).click()
         assert page.locator("#account-operation-list .operation-card").count() == 6
         page.locator("#account-settings").click()
         assert page.locator("#connection-token").input_value() == ""

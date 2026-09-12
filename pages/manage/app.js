@@ -61,10 +61,31 @@ function operationCard(item) {
   actions.append(actionButton('编辑', () => openEditor(item)), actionButton(item.enabled === false ? '启用' : '停用', () => toggle(item)), actionButton('删除', () => remove(item), 'danger'));
   const heading = el('div', undefined, 'operation-heading'); heading.append(top, actions);
   const details = el('details', undefined, 'operation-details');
-  details.append(el('summary', '接口详情'), el('p', `调用名称：${state.tool_names?.[item.name] || item.tool_name || `api_${item.name}`}`, 'hint'), el('p', item.request.url, 'endpoint'), el('p', item.description, 'muted'));
-  card.append(heading, details); return card;
+  details.append(el('summary', '接口详情'), el('p', item.request.url, 'endpoint'), el('p', item.description, 'muted'));
+  const name = el('p', state.tool_names?.[item.name] || item.tool_name || `api_${item.name}`, 'operation-call-name');
+  card.append(heading, name, details); return card;
 }
-function enterAccount(connection) { activeAccount = connection.id; renderList(); }
+function clearOperationFilters() {
+  $('operation-search').value = ''; $('operation-status').value = ''; $('operation-method').value = '';
+}
+function renderAccountOperations(items) {
+  const term = $('operation-search').value.trim().toLowerCase();
+  const status = $('operation-status').value, method = $('operation-method').value;
+  const matches = items.filter((item) => (!method || item.request.method === method)
+    && (!status || (item.enabled !== false) === (status === 'enabled'))
+    && [item.name, item.display_name || '', state.tool_names?.[item.name] || item.tool_name || '', item.request.url, item.description].some((value) => value.toLowerCase().includes(term)));
+  $('operation-count').textContent = `显示 ${matches.length} / ${items.length} 个操作`;
+  $('account-operation-list').replaceChildren(...matches.map(operationCard));
+  if (!matches.length) {
+    const empty = el('div', undefined, 'operation-empty');
+    empty.append(el('h3', '没有匹配的操作'), el('p', '尝试其他关键词，或清除筛选查看全部操作。', 'muted'), actionButton('查看全部操作', () => { clearOperationFilters(); renderList(); }));
+    $('account-operation-list').append(empty);
+  }
+}
+function enterAccount(connection) { activeAccount = connection.id; clearOperationFilters(); renderList(); }
+$('operation-search').oninput = () => renderAccountOperations(state.items.filter((item) => item.connection?.id === activeAccount));
+$('operation-status').onchange = $('operation-method').onchange = () => renderList();
+$('clear-operation-filters').onclick = () => { clearOperationFilters(); renderList(); };
 $('back-accounts').onclick = () => { activeAccount = null; renderList(); };
 function renderList() {
   const accountItems = state.items.filter((item) => item.connection?.id === activeAccount);
@@ -74,7 +95,7 @@ function renderList() {
     const connection = accountItems[0].connection;
     $('account-page-title').textContent = connection.name;
     $('account-page-count').textContent = `${accountItems.length} 个操作 · ${accountItems.filter((item) => item.enabled !== false).length} 个启用`;
-    $('account-operation-list').replaceChildren(...accountItems.map(operationCard));
+    renderAccountOperations(accountItems);
     $('account-settings').disabled = $('account-delete').disabled = busy;
     $('account-settings').onclick = () => openConnection(connection);
     $('account-delete').onclick = () => deleteConnection(connection).catch((error) => notice(error.message, true));
