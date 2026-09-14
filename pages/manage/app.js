@@ -51,13 +51,18 @@ function descriptionText(text, className = 'muted', info = null) {
       if (!urls.has(parsed.href)) urls.set(parsed.href, label);
     } catch { /* Invalid document addresses remain unavailable. */ }
   };
+  for (const ref of info?.references || []) add(ref.url, ref.label || '官方参考');
   if (info?.documentation) add(info.documentation, info.documentation.startsWith('https://github.com/facebook/facebook-python-business-sdk/') ? '官方 SDK 参考' : '官方字段与接口说明');
   const source = String(text || '').replace(/(?:字段说明[：:]\s*)?https?:\/\/[^\s<>"'，。；）]+/g, (match) => {
     add(match.replace(/^字段说明[：:]\s*/, ''), '参考文档');
     return '';
   }).trim();
+  if (info?.permission_explanation) section.append(el('p', info.permission_explanation, 'operation-explanation'));
   if (source) section.append(el('p', source, className));
-  for (const [url, label] of urls) section.append(documentationLink(url, label));
+  if (info?.parameter_explanation) section.append(el('p', info.parameter_explanation, 'hint'));
+  const references = urls.size > 1 ? el('details', undefined, 'documentation-references') : section;
+  if (references !== section) { references.append(el('summary', `官方文档与参考（${urls.size}）`)); section.append(references); }
+  for (const [url, label] of urls) references.append(documentationLink(url, label));
   return section;
 }
 function confirmAction(title, text, button = '确认') {

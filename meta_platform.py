@@ -65,6 +65,53 @@ def endpoint(op):
     return "https://graph.facebook.com/" + catalog()["api_version"] + "/{node_id}" + op["path"]
 
 
+def operation_help(op):
+    root = (
+        "https://github.com/facebook/facebook-python-business-sdk/blob/"
+        + catalog()["source_commit"]
+        + "/facebook_business/adobjects/"
+    )
+    files = {}
+    for source in op["sources"]:
+        files.setdefault(source["file"], []).append(source["object"] + "." + source["method"])
+    effect = {
+        "GET": "查询对象或关联数据；返回字段、筛选和分页由请求参数决定。",
+        "POST": "可能创建对象、修改配置或提交任务；具体行为取决于对象和 SDK 方法，不能按只读查询理解。",
+        "DELETE": "可能删除对象或解除关联；具体范围由对象和参数决定。",
+        "PUT": "更新对象或关联配置；具体范围由对象和参数决定。",
+    }[op["method"]]
+    return {
+        "permission_explanation": (
+            effect
+            + " 此开关允许当前接入账户调用 "
+            + op["method"]
+            + " /{node_id}"
+            + op["path"]
+            + "；下列 SDK 对象共享该方法与路径权限，不是单独授权其中一个对象。"
+            + " 关闭后 Agent 不能调用此项；开启不等于获得 Meta 权限，仍受 Token、应用权限及资产访问范围限制。"
+        ),
+        "parameter_explanation": "下列参数来自固定 SDK 目录；同一路径合并了不同对象的参数，不表示每个对象都支持全部参数。请在对应对象的 SDK 方法中核对字段、类型与枚举；必填项及平台权限以官方接口要求为准。",
+        "references": [
+            {
+                "label": "官方接入指南",
+                "url": "https://developers.facebook.com/docs/business-sdk/getting-started",
+            },
+            {
+                "label": "官方 Access Token 说明",
+                "url": "https://developers.facebook.com/docs/facebook-login/access-tokens",
+            },
+            {
+                "label": "官方 Marketing API 字段参考目录",
+                "url": "https://developers.facebook.com/docs/marketing-api/reference",
+            },
+        ]
+        + [
+            {"label": "官方 SDK · " + ", ".join(sorted(set(methods))), "url": root + file}
+            for file, methods in files.items()
+        ],
+    }
+
+
 def platform_entry():
     return {
         "id": PLATFORM,
@@ -79,12 +126,17 @@ def platform_entry():
                 + " · "
                 + TITLES.get(op["path"].strip("/") or "node", describe(op)["label"]),
                 **describe(op),
+                **operation_help(op),
                 "method": op["method"],
                 "path": "/{node_id}" + op["path"],
                 "description": "对象："
                 + ", ".join(sorted({s["object"] for s in op["sources"]}))
                 + "；参数："
-                + ", ".join(k for k in op["params"] if k not in RESERVED),
+                + ", ".join(
+                    k + " (" + " / ".join(v) + ")"
+                    for k, v in op["params"].items()
+                    if k not in RESERVED
+                ),
                 "documentation": "https://github.com/facebook/facebook-python-business-sdk/blob/"
                 + catalog()["source_commit"]
                 + "/facebook_business/adobjects/"

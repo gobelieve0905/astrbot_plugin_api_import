@@ -66,6 +66,22 @@ class MetaCatalogTests(unittest.TestCase):
         self.assertTrue({"Ad", "AdSet", "Campaign"} <= sources)
         self.assertEqual(len(Platforms.platform_catalog()["platforms"]), 2)
 
+    def test_operation_help_covers_every_source_without_changing_routes(self):
+        for entry in Meta.platform_entry()["operations"]:
+            op = Meta.operations()[entry["id"]]
+            refs = entry["references"]
+            sdk_refs = [r for r in refs if "github.com/" in r["url"]]
+            self.assertEqual(len(sdk_refs), len({s["file"] for s in op["sources"]}))
+            for source in op["sources"]:
+                ref = next(r for r in sdk_refs if r["url"].endswith("/" + source["file"]))
+                self.assertIn(source["object"] + "." + source["method"], ref["label"])
+                self.assertIn(Meta.catalog()["source_commit"], ref["url"])
+            self.assertIn(
+                op["method"] + " /{node_id}" + op["path"], entry["permission_explanation"]
+            )
+            self.assertIn("不表示每个对象都支持全部参数", entry["parameter_explanation"])
+            self.assertEqual(entry["path"], "/{node_id}" + op["path"])
+
     def test_full_connection_default_off_and_two_accounts(self):
         first = make_items()
         second = make_items("Meta_Second", ["get_adaccounts", "post_campaigns"])
