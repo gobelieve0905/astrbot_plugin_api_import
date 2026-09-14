@@ -296,3 +296,51 @@ def upgrade_advertiser(items):
             ):
                 field["description"] = description
     return items
+
+
+def normalize_advertiser_arguments(definition, arguments):
+    """Compatibility only for recognizable advertiser presets; never infer filter values."""
+    from .engine import ExecutionError
+
+    request = definition.request
+    connection = definition.connection
+    query = request.get("query", {})
+    recognized = (
+        connection.get("platform") == "applovin_report"
+        and connection.get("operation") == "advertiser"
+    ) or bool(re.fullmatch(r"applovin_advertiser_[0-9a-f]{8}", definition.name))
+    if not (
+        recognized
+        and request.get("method") == "GET"
+        and request.get("url") == BASE + "/report"
+        and query.get("report_type") == "advertiser"
+        and isinstance(arguments, dict)
+    ):
+        return arguments
+    arguments = copy.deepcopy(arguments)
+    properties = definition.parameters.get("properties", {})
+    canonical = "filter_campaign_package_name"
+    if (
+        "filter_package_name" in arguments
+        and properties.get(canonical, {}).get("type") == "array"
+        and query.get(canonical) == {"$param": canonical, "$join": ","}
+        and "filter_package_name" not in properties
+    ):
+        if canonical in arguments:
+            raise ExecutionError(
+                "filter_package_name 与 filter_campaign_package_name 不能同时提供；请仅使用 filter_campaign_package_name 字符串数组"
+            )
+        arguments[canonical] = arguments.pop("filter_package_name")
+    for name, schema in properties.items():
+        value = arguments.get(name)
+        if (
+            name.startswith("filter_")
+            and schema.get("type") == "array"
+            and schema.get("items", {}).get("type") == "string"
+            and query.get(name) == {"$param": name, "$join": ","}
+            and isinstance(value, str)
+            and value
+            and "," not in value
+        ):
+            arguments[name] = [value]
+    return arguments

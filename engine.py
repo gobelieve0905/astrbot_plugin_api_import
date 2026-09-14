@@ -134,7 +134,9 @@ class Executor:
         try:
             if self.closed or not definition.enabled or not guard():
                 raise ExecutionError("工具已停用或插件已卸载")
-            arguments = copy.deepcopy(arguments)
+            from .platforms import normalize_advertiser_arguments
+
+            arguments = normalize_advertiser_arguments(definition, copy.deepcopy(arguments))
             for key, schema in definition.parameters.get("properties", {}).items():
                 if key not in arguments and isinstance(schema, dict) and "default" in schema:
                     arguments[key] = copy.deepcopy(schema["default"])
@@ -143,8 +145,10 @@ class Executor:
                 path = ".".join(str(x) for x in errors[0].absolute_path) or "参数"
                 error = errors[0]
                 if error.validator == "additionalProperties":
+                    allowed = ", ".join(definition.parameters.get("properties", {}))
                     raise ExecutionError(
-                        "存在未定义参数；请严格使用工具声明的参数名称，不要自行增加或猜测筛选字段"
+                        "存在未定义参数；请严格使用工具声明的参数名称。允许的顶层参数："
+                        + allowed[:1800]
                     )
                 expected = (
                     error.schema.get("type", "声明类型")
