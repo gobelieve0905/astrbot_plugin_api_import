@@ -72,3 +72,20 @@ class MetaArrayPaging(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(
             len(self.sent), 1
         )  # Never auto query another account or grant a permission.
+
+    async def test_duplicate_fields_are_deduplicated_without_relaxing_validation(self):
+        result = await self.call(
+            "get_insights", {"node_id": "act_123", "fields": ["spend", "spend", "ad_id"]}
+        )
+        self.assertTrue(result["ok"])
+        self.assertEqual(parse_qs(self.sent[-1].url.query.decode())["fields"], ["spend,ad_id"])
+        sent = len(self.sent)
+        for fields in [
+            ["spend"] * 101,
+            ["unknown_invalid_field", "unknown_invalid_field"],
+            ["spend", {"token": "x"}],
+        ]:
+            self.assertFalse(
+                (await self.call("get_insights", {"node_id": "act_123", "fields": fields}))["ok"]
+            )
+        self.assertEqual(len(self.sent), sent)

@@ -148,6 +148,17 @@ class Executor:
             from .platforms import normalize_advertiser_arguments
 
             arguments = normalize_advertiser_arguments(definition, copy.deepcopy(arguments))
+            if definition.connection.get("platform") == "meta_marketing" and isinstance(
+                arguments, dict
+            ):
+                fields = arguments.get("fields")
+                if (
+                    isinstance(fields, list)
+                    and len(fields) <= 100
+                    and all(isinstance(f, str) for f in fields)
+                ):
+                    arguments["fields"] = list(dict.fromkeys(fields))
+
             for key, schema in definition.parameters.get("properties", {}).items():
                 if key not in arguments and isinstance(schema, dict) and "default" in schema:
                     arguments[key] = copy.deepcopy(schema["default"])
