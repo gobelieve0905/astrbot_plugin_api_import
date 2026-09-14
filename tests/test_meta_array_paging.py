@@ -89,3 +89,61 @@ class MetaArrayPaging(unittest.IsolatedAsyncioTestCase):
                 (await self.call("get_insights", {"node_id": "act_123", "fields": fields}))["ok"]
             )
         self.assertEqual(len(self.sent), sent)
+
+    async def test_local_windows_read_all_rows_without_new_network_and_enforce_scope(self):
+        definition = one("get_insights")
+        self.allowed.add(("abc123ab", "get_insights"))
+        self.response = {
+            "data": [
+                {"ad_id": str(i), "actions": [{"action_type": "purchase", "value": "1"}]}
+                for i in range(120)
+            ]
+        }
+        first = await self.executor.execute(definition, {"node_id": "act_123"})
+        rid = first["result_id"]
+        ids, offset = [], 0
+        while offset is not None:
+            page = await self.executor.execute(
+                definition,
+                {"node_id": "act_123", "result_page": {"id": rid, "offset": offset, "limit": 17}},
+            )
+            self.assertTrue(page["ok"], page)
+            ids.extend(row["ad_id"] for row in page["data"])
+            offset = page["next_offset"]
+        self.assertEqual(ids, [str(i) for i in range(120)])
+        self.assertEqual(len(self.sent), 1)
+        for node, result_id in [("act_other", rid), ("act_123", "../secret")]:
+            denied = await self.executor.execute(
+                definition, {"node_id": node, "result_page": {"id": result_id}}
+            )
+            self.assertFalse(denied["ok"])
+        self.assertFalse(
+            (
+                await self.executor.execute(
+                    one("get_insights"), {"node_id": "act_123", "result_page": {"id": rid}}
+                )
+            )["ok"]
+        )
+        self.allowed.clear()
+        self.assertFalse(
+            (
+                await self.executor.execute(
+                    definition, {"node_id": "act_123", "result_page": {"id": rid}}
+                )
+            )["ok"]
+        )
+        self.assertEqual(len(self.sent), 1)
+
+    async def test_local_windows_recheck_related_permissions_and_file_integrity(self):
+        definition = one("get_adaccounts")
+        self.allowed.update({("abc123ab", "get_adaccounts"), ("abc123ab", "get_ads")})
+        self.response = {"data": [{"id": "act_123", "ads": []}]}
+        result = await self.executor.execute(definition, {"node_id": "me", "fields": ["ads"]})
+        rid = result["result_id"]
+        args = {"node_id": "me", "result_page": {"id": rid}}
+        self.allowed.remove(("abc123ab", "get_ads"))
+        self.assertFalse((await self.executor.execute(definition, args))["ok"])
+        self.allowed.add(("abc123ab", "get_ads"))
+        self.executor.saved_results[rid][2].write_text('{"data": [{"id": "tampered"}]}')
+        self.assertFalse((await self.executor.execute(definition, args))["ok"])
+        self.assertEqual(len(self.sent), 1)

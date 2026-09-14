@@ -275,6 +275,12 @@ async def main():
     assert "User" in meta_tool.description
     assert not (await meta_tool.call(None, node_id="me")).isError
     assert len(sent) == 1
+    assert "result_page" in meta_tool.parameters["properties"]
+    response = await meta_tool.call(None, node_id="me")
+    saved_result = json.loads(response.content[0].text)
+    local = await meta_tool.call(None, node_id="me", result_page={"id": saved_result["result_id"]})
+    assert not local.isError and json.loads(local.content[0].text)["local_result"]
+    sent.pop()  # Preserve later cancellation assertions; local read did not send a request.
     # Simulate transport waiting for a connection, before any upstream side effect.
     waiting = asyncio.Event()
     transport_cancelled = asyncio.Event()

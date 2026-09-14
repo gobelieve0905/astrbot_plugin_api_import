@@ -171,3 +171,5 @@ HTTP 失败的标准工具结果包含 `status`、`error_detail` 和 `error_deta
 Meta 目录提供 11 个插件业务分类、用途说明、适用 SDK 对象与官方参考。分类用于查找，不代表 Meta 官方唯一分类，也不改变操作权限。新增接入、账户设置和账户详情均可按业务分类筛选；勾选“全选当前筛选结果”或使用全选/取消全选按钮，只修改筛选命中的项。半选状态表示当前结果仅部分选中，无结果时全选禁用。
 
 标准 AppLovin 广告报表兼容 `filter_package_name` 作为 `filter_campaign_package_name` 的别名；单个筛选字符串会转为单元素数组，多值请传 JSON 数组。新旧名称不能同时传入，不会猜测或更改包名。此兼容不适用于 Meta 或手动定义的其他接口。
+
+Meta 账户列表和 Insights 返回 `result_id` 时，可用同一工具传原 `node_id` 与 `result_page={"id":"结果 ID","offset":0,"limit":20}` 读取本地完整行，不再传 `fields` 或 `params`。按 `next_offset` 继续，直到为空，再处理原 `page.has_more` 指示的远端分页。可用 `columns` 选择已返回的列。结果 ID 在插件重载、工具更新或缓存淘汰后失效；权限关闭后不能继续读取。该功能不自动统计所有账户。

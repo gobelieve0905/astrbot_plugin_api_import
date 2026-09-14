@@ -126,6 +126,7 @@ class Executor:
         )
         self.meta_proxy_resolver = meta_proxy_resolver
         self.fixed_proxy_clients = {}
+        self.saved_results = {}
         self.history = deque(maxlen=50)
         self.semaphore = asyncio.Semaphore(4)
         self.closed = False
@@ -133,11 +134,61 @@ class Executor:
 
     async def close(self):
         self.closed = True
+        self.saved_results.clear()
         await self.client.aclose()
         if self.meta_client is not None:
             await self.meta_client.aclose()
         for client in self.fixed_proxy_clients.values():
             await client.aclose()
+
+    async def read_result(self, definition, arguments, guard):
+        from .meta_platform import prepare
+        from .result_pages import SCHEMA, digest, supported, window
+
+        if not supported(definition) or set(arguments) != {"node_id", "result_page"}:
+            raise ExecutionError("本地读取只允许本报表工具的 node_id 和 result_page")
+        options = arguments["result_page"]
+        if list(Draft202012Validator(SCHEMA).iter_errors(options)):
+            raise ExecutionError(
+                "result_page 参数无效，请使用结果 ID、非负 offset 和 1–100 的 limit"
+            )
+        entry = self.saved_results.get(options["id"])
+        if (
+            entry is None
+            or entry[0] is not definition
+            or entry[1].get("node_id") != arguments["node_id"]
+        ):
+            raise ExecutionError(
+                "结果不存在、已过期或不属于当前工具/账户；请重新查询，不能指定文件路径"
+            )
+
+        def check():
+            if self.closed or not definition.enabled or not guard():
+                raise ExecutionError("工具已关闭，不能读取结果")
+            prepare(definition, entry[1], self.permitted)
+
+        check()
+        path = entry[2]
+        if path.is_symlink() or path.stat().st_size > 32 * 1024 * 1024:
+            raise ExecutionError("结果文件无效")
+        text = await asyncio.to_thread(path.read_text, encoding="utf-8")
+        check()
+        if digest(text) != entry[3]:
+            raise ExecutionError("结果文件已变化，请重新查询")
+        try:
+            result = window(text, options)
+        except ValueError as exc:
+            raise ExecutionError(str(exc)) from None
+        return {
+            "ok": True,
+            "tool": definition.tool_name,
+            "local_result": True,
+            "result_id": options["id"],
+            "remote_page": {k: entry[4].get(k) for k in ("row_count", "has_more", "after")}
+            if entry[4]
+            else None,
+            **result,
+        }
 
     async def execute(self, definition: Definition, arguments: dict, guard=lambda: True) -> dict:
         started = time.monotonic()
@@ -145,6 +196,11 @@ class Executor:
         try:
             if self.closed or not definition.enabled or not guard():
                 raise ExecutionError("工具已停用或插件已卸载")
+            from .result_pages import supported
+
+            if supported(definition) and isinstance(arguments, dict) and "result_page" in arguments:
+                result = await self.read_result(definition, arguments, guard)
+                return result
             from .platforms import normalize_advertiser_arguments
 
             arguments = normalize_advertiser_arguments(definition, copy.deepcopy(arguments))
@@ -337,11 +393,33 @@ class Executor:
                 result["data"] = selected
             if definition.response.get("save", False):
                 self.data_dir.mkdir(parents=True, exist_ok=True)
-                filename = f"{definition.name}-{uuid.uuid4().hex}.json"
+                result_id = uuid.uuid4().hex
+                filename = f"{definition.name}-{result_id}.json"
                 path = self.data_dir / filename
-                await asyncio.to_thread(
-                    path.write_text, json.dumps(data, ensure_ascii=False), encoding="utf-8"
-                )
+                saved_text = json.dumps(data, ensure_ascii=False)
+                await asyncio.to_thread(path.write_text, saved_text, encoding="utf-8")
+                from .result_pages import digest, supported
+
+                if (
+                    supported(definition)
+                    and isinstance(data, dict)
+                    and isinstance(data.get("data"), list)
+                ):
+                    self.saved_results[result_id] = (
+                        definition,
+                        copy.deepcopy(arguments),
+                        path,
+                        digest(saved_text),
+                        copy.deepcopy(result.get("page")),
+                    )
+                    while len(self.saved_results) > 256:
+                        self.saved_results.pop(next(iter(self.saved_results)))
+                    result["result_id"] = result_id
+                    result["read_result"] = (
+                        "用本工具传原 node_id 和 result_page={id: result_id, offset: 0, limit: 20} 读取完整行；无需重复请求 Meta。读完本地窗口后再检查 page.has_more，不能跳过远端分页或其他账户。"
+                    )
+                    if result.get("truncated") and result.get("page"):
+                        result["page"]["next_step"] = result["read_result"]
                 result["file"] = str(path.resolve())
                 result["file_scope"] = "完整单次响应（未自动分页）；服务器本地 JSON 文件"
         except (httpx.HTTPError, TimeoutError) as exc:
@@ -361,7 +439,12 @@ class Executor:
         except (ValueError, TypeError, LookupError):
             result.update(ok=False, error="请求参数、编码或响应格式无效")
         except OSError:
-            result.update(ok=False, error="结果文件保存失败；远程请求可能已经成功")
+            result.update(
+                ok=False,
+                error="结果文件无法读取，请重新查询"
+                if isinstance(arguments, dict) and "result_page" in arguments
+                else "结果文件保存失败；远程请求可能已经成功",
+            )
         finally:
             self.history.append(
                 {

@@ -16,6 +16,7 @@ from .engine import Executor
 from .importing import import_curl
 from .platforms import platform_catalog
 from .proxy_nodes import FixedProxyNodes
+from .result_pages import tool_parameters
 
 
 class ImportedTool(FunctionTool):
@@ -28,7 +29,7 @@ class ImportedTool(FunctionTool):
         super().__init__(
             name=definition.tool_name,
             description=description,
-            parameters=definition.parameters,
+            parameters=tool_parameters(definition),
         )
         self.display_name = definition.display_name
         self.definition = definition
