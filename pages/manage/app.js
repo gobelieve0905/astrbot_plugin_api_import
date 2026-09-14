@@ -81,6 +81,37 @@ $('confirm-yes').onclick = () => finishConfirm(true);
 $('confirm-no').onclick = () => finishConfirm(false);
 $('confirm-dialog').addEventListener('cancel', (event) => { event.preventDefault(); finishConfirm(false); });
 
+let proxyState = null;
+async function openMetaProxy() {
+  const dialog = $('meta-proxy-dialog');
+  $('meta-proxy-error').hidden = true;
+  $('meta-proxy-save').disabled = true;
+  $('meta-proxy-select').replaceChildren();
+  if (!dialog.open) dialog.showModal();
+  try {
+    proxyState = await bridge.apiGet('meta-proxy');
+    const blank = el('option', '请选择固定节点'); blank.value = ''; $('meta-proxy-select').append(blank);
+    for (const node of proxyState.nodes) { const option = el('option', node.name); option.value = node.id; $('meta-proxy-select').append(option); }
+    $('meta-proxy-select').value = proxyState.ready ? proxyState.selected : '';
+    $('meta-proxy-current').textContent = proxyState.ready ? `当前固定节点：${proxyState.nodes.find(n => n.id === proxyState.selected).name}` : '尚未选择可用的固定节点，Meta 请求已暂停。';
+    if (!proxyState.nodes.length) throw new Error('服务器尚未配置固定节点目录，请联系管理员。');
+    $('meta-proxy-save').disabled = false;
+  } catch (error) { $('meta-proxy-error').textContent = error.message; $('meta-proxy-error').hidden = false; }
+}
+$('meta-proxy-open').onclick = $('connection-proxy-open').onclick = $('platform-proxy-open').onclick = openMetaProxy;
+$('meta-proxy-close').onclick = () => $('meta-proxy-dialog').close();
+$('meta-proxy-save').onclick = async () => {
+  const nodeId = $('meta-proxy-select').value;
+  if (!nodeId || !proxyState) return;
+  if (proxyState.selected && proxyState.selected !== nodeId && !await confirmAction('切换 Meta 固定节点', '此操作影响全部 Meta 接入并改变网络出口。确认切换到所选节点？', '确认切换')) return;
+  $('meta-proxy-save').disabled = true;
+  try {
+    proxyState = await bridge.apiPost('meta-proxy', { revision: proxyState.revision, node_id: nodeId });
+    await openMetaProxy(); notice('Meta 固定节点已保存。节点故障时停止请求，不自动切换。');
+  } catch (error) { $('meta-proxy-error').textContent = error.message; $('meta-proxy-error').hidden = false; }
+  finally { $('meta-proxy-save').disabled = false; }
+};
+
 async function refresh() {
   state = await bridge.apiGet('catalog');
   renderList();
@@ -190,6 +221,7 @@ function renderList() {
 }
 let connectionDraft = null, connectionRevision = null, connectionDirty = false;
 function openConnection(connection) {
+  $('connection-proxy-open').hidden = connection.platform !== 'meta_marketing';
   connectionDraft = connection; connectionRevision = state.revision; connectionDirty = false;
   $('connection-call-name').value = connection.call_name || '';
   $('connection-name').value = connection.name; $('connection-token').value = ''; $('connection-error').hidden = true;
@@ -467,6 +499,7 @@ function resetPlatform() {
 }
 function renderPlatform() {
   const platform = platforms.find((item) => item.id === $('platform-select').value);
+  $('platform-proxy-open').hidden = platform?.id !== 'meta_marketing';
   $('platform-description').textContent = platform?.description || '平台列表尚未就绪，请刷新页面重试，或使用手动填写方式。';
   $('platform-token-label').textContent = platform?.token_label || 'Token';
   $('platform-token').placeholder = `填写 ${platform?.token_label || 'Token'}`;

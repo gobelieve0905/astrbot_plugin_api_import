@@ -15,6 +15,7 @@ from .definitions import DefinitionError, parse_definitions
 from .engine import Executor
 from .importing import import_curl
 from .platforms import platform_catalog
+from .proxy_nodes import FixedProxyNodes
 
 
 class ImportedTool(FunctionTool):
@@ -75,12 +76,17 @@ class ApiImportPlugin(Star):
         self.tools = []
         self.executor = None
         self.configuration_error = None
+        self.proxy_nodes = FixedProxyNodes(
+            StarTools.get_data_dir("astrbot_plugin_api_import") / "meta_proxy_nodes.json", config
+        )
         self.closed = False
         self.catalog = Catalog(config, self._apply_saved)
         self.edit_lock = asyncio.Lock()
         self.web_handlers = []
         for route, handler, methods in (
             ("catalog", self.page_catalog, ["GET"]),
+            ("meta-proxy", self.page_meta_proxy, ["GET"]),
+            ("meta-proxy", self.page_save_meta_proxy, ["POST"]),
             ("save", self.page_save, ["POST"]),
             ("delete", self.page_delete, ["POST"]),
             ("import-curl", self.page_import_curl, ["POST"]),
@@ -133,7 +139,7 @@ class ApiImportPlugin(Star):
     async def initialize(self):
         self.executor = Executor(
             StarTools.get_data_dir("astrbot_plugin_api_import") / "results",
-            meta_proxy=self.context.get_config().get("http_proxy") or None,
+            meta_proxy_resolver=self.proxy_nodes.resolve,
         )
         self.executor.permitted = lambda connection_id, operation: any(
             tool.available
@@ -158,6 +164,60 @@ class ApiImportPlugin(Star):
             await self.terminate()
             raise
         logger.info(f"API 工具接入已加载 {len(self.tools)} 个工具")
+
+    async def page_meta_proxy(self):
+        try:
+            return json_response(self.proxy_nodes.snapshot())
+        except (DefinitionError, OSError):
+            return error_response("固定代理节点目录不可用，请联系管理员", status_code=503)
+
+    async def page_save_meta_proxy(self):
+        try:
+            payload = await request.json()
+            async with self.edit_lock:
+                if self.closed:
+                    raise DefinitionError("插件已卸载，请刷新页面")
+                state = self.proxy_nodes.snapshot()
+                if not isinstance(payload, dict) or payload.get("revision") != state["revision"]:
+                    raise ConflictError("代理设置已更新，请刷新后重试")
+                selected = payload.get("node_id")
+                if selected not in {n["id"] for n in state["nodes"]}:
+                    raise DefinitionError("请选择目录中的固定节点，不能指定任意地址")
+                old = self.config.get("meta_proxy_node", "")
+                if old != selected:
+                    old_meta = [
+                        t
+                        for t in self.tools
+                        if t.definition.connection.get("platform") == "meta_marketing"
+                    ]
+                    new_meta = [
+                        t
+                        for t in self._prepare_tools(self.definitions)
+                        if t.definition.connection.get("platform") == "meta_marketing"
+                    ]
+                    owned = {id(t) for t in old_meta}
+                    manager = self.context.get_llm_tool_manager()
+                    previous_registry = list(manager.func_list)
+                    try:
+                        manager.func_list[:] = [t for t in manager.func_list if id(t) not in owned]
+                        if new_meta:
+                            self.context.add_llm_tools(*new_meta)
+                        self.config["meta_proxy_node"] = selected
+                        self.config.save_config()
+                    except Exception:
+                        manager.func_list[:] = previous_registry
+                        self.config["meta_proxy_node"] = old
+                        raise
+                    for tool in old_meta:
+                        tool.invalidate()
+                    self.tools = [t for t in self.tools if id(t) not in owned] + new_meta
+                return json_response(self.proxy_nodes.snapshot())
+        except ConflictError as exc:
+            return error_response(str(exc), status_code=409)
+        except DefinitionError as exc:
+            return error_response(str(exc))
+        except Exception:
+            return error_response("固定代理保存失败，原设置已保留", status_code=500)
 
     async def page_catalog(self):
         if self.closed:

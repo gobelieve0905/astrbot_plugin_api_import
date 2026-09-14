@@ -94,3 +94,5 @@ main{max-width:1240px;padding:30px 28px}header{margin-bottom:24px}
 .documentation-label { font-weight: 600; }
 .documentation-copy input { min-width: 0; width: 100%; font-family: monospace; user-select: text; }
 .connection-permission > .operation-details { grid-column: 1 / -1; }
+
+#meta-proxy-dialog{max-width:640px}#meta-proxy-dialog[open]{display:flex;flex-direction:column}.header-actions{display:flex;gap:8px;flex-wrap:wrap}

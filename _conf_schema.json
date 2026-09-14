@@ -4,5 +4,11 @@
     "description": "API 工具定义（JSON 数组）",
     "hint": "推荐在插件详情 → API 管理页面中新增和编辑，页面保存立即生效。此处保留完整 JSON 数组入口；手动修改后需重载插件。空数组不注册任何 API。",
     "default": "[]"
+  },
+  "meta_proxy_node": {
+    "type": "string",
+    "description": "Meta 固定代理节点 ID",
+    "hint": "请在 API 管理页面的 Meta 固定代理设置中选择；留空停止 Meta 请求，不沿用宿主自动代理。",
+    "default": ""
   }
 }

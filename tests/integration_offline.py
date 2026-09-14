@@ -236,8 +236,39 @@ async def main():
         sent.append(request)
         return httpx.Response(200, json={"data": [{"id": "act_123"}]})
 
-    await plugin.executor.client.aclose()
-    plugin.executor.client = httpx.AsyncClient(transport=httpx.MockTransport(meta_response))
+    meta_tool = next(t for t in meta_tools if t.name == "Meta_Main_get_adaccounts")
+    assert (await meta_tool.call(None, node_id="me")).isError
+    assert not sent
+    proxy_url = "http://fixed.test:17900"
+    plugin.proxy_nodes.path.parent.mkdir(parents=True, exist_ok=True)
+    plugin.proxy_nodes.path.write_text(
+        json.dumps(
+            [
+                {"id": "fixed_a", "name": "固定节点 A", "url": proxy_url},
+                {"id": "fixed_b", "name": "固定节点 B", "url": "http://fixed.test:17901"},
+            ]
+        )
+    )
+    app_tool = next(t for t in plugin.tools if not t.name.startswith("Meta_Main_"))
+    revision = plugin.proxy_nodes.snapshot()["revision"]
+    rejected = await web_call(
+        plugin.page_save_meta_proxy, {"revision": revision, "node_id": "arbitrary"}
+    )
+    assert rejected.status_code == 400
+    saved = await web_call(
+        plugin.page_save_meta_proxy, {"revision": revision, "node_id": "fixed_a"}
+    )
+    assert saved.status_code == 200
+    assert not meta_tool.available and app_tool in plugin.tools and app_tool.available
+    stale = await web_call(
+        plugin.page_save_meta_proxy, {"revision": revision, "node_id": "fixed_b"}
+    )
+    assert stale.status_code == 409
+    assert plugin.config["meta_proxy_node"] == "fixed_a"
+    meta_tools = [t for t in plugin.tools if t.name.startswith("Meta_Main_")]
+    plugin.executor.fixed_proxy_clients[proxy_url] = httpx.AsyncClient(
+        transport=httpx.MockTransport(meta_response)
+    )
     meta_tool = next(t for t in meta_tools if t.name == "Meta_Main_get_adaccounts")
     assert "/me/adaccounts" in meta_tool.description
     assert "User" in meta_tool.description
@@ -256,8 +287,10 @@ async def main():
             raise
         raise AssertionError("Revoked request must never proceed")
 
-    await plugin.executor.client.aclose()
-    plugin.executor.client = httpx.AsyncClient(transport=httpx.MockTransport(waiting_transport))
+    await plugin.executor.fixed_proxy_clients[proxy_url].aclose()
+    plugin.executor.fixed_proxy_clients[proxy_url] = httpx.AsyncClient(
+        transport=httpx.MockTransport(waiting_transport)
+    )
     connecting = asyncio.create_task(meta_tool.call(None, node_id="me"))
     await waiting.wait()
     plugin.executor.semaphore = asyncio.Semaphore(0)

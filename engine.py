@@ -116,7 +116,7 @@ def sanitize_error(text, request):
 
 
 class Executor:
-    def __init__(self, data_dir: Path, client=None, *, meta_proxy=None):
+    def __init__(self, data_dir: Path, client=None, *, meta_proxy=None, meta_proxy_resolver=None):
         self.data_dir = Path(data_dir)
         self.client = client or httpx.AsyncClient(follow_redirects=False, trust_env=False)
         self.meta_client = (
@@ -124,6 +124,8 @@ class Executor:
             if meta_proxy
             else None
         )
+        self.meta_proxy_resolver = meta_proxy_resolver
+        self.fixed_proxy_clients = {}
         self.history = deque(maxlen=50)
         self.semaphore = asyncio.Semaphore(4)
         self.closed = False
@@ -134,6 +136,8 @@ class Executor:
         await self.client.aclose()
         if self.meta_client is not None:
             await self.meta_client.aclose()
+        for client in self.fixed_proxy_clients.values():
+            await client.aclose()
 
     async def execute(self, definition: Definition, arguments: dict, guard=lambda: True) -> dict:
         started = time.monotonic()
@@ -218,6 +222,13 @@ class Executor:
                         if is_meta and self.meta_client is not None
                         else self.client
                     )
+                    if is_meta and self.meta_proxy_resolver is not None:
+                        proxy = self.meta_proxy_resolver()
+                        if proxy not in self.fixed_proxy_clients:
+                            self.fixed_proxy_clients[proxy] = httpx.AsyncClient(
+                                proxy=proxy, follow_redirects=False, trust_env=False
+                            )
+                        client = self.fixed_proxy_clients[proxy]
                     async with client.stream(
                         request["method"],
                         url,
@@ -297,7 +308,7 @@ class Executor:
             result["network_route"] = (
                 "configured_proxy"
                 if definition.connection.get("platform") == "meta_marketing"
-                and self.meta_client is not None
+                and (self.meta_client is not None or self.meta_proxy_resolver is not None)
                 else "direct"
             )
             result["network_hint"] = (
