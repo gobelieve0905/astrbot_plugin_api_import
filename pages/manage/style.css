@@ -88,3 +88,10 @@ main{max-width:1240px;padding:30px 28px}header{margin-bottom:24px}
  .permission-filters label:first-child { grid-column: 1/-1; }
  .permission-filters label:nth-child(2), .permission-filters button { grid-column: span 1; }
 }
+
+.documentation-copy { display: inline-grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; width: 100%; margin: 8px 0; vertical-align: middle; }
+.documentation-copy .documentation-label, .documentation-copy .hint { grid-column: 1 / -1; }
+.documentation-label { font-weight: 600; }
+.documentation-copy input { min-width: 0; width: 100%; font-family: monospace; user-select: text; }
+.documentation-copy button { white-space: nowrap; }
+.connection-permission > .operation-details { grid-column: 1 / -1; }

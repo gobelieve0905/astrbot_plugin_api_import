@@ -26,6 +26,45 @@ function el(tag, text, className) {
   if (className) node.className = className;
   return node;
 }
+function documentationLink(url, label) {
+  try {
+    const parsed = new URL(url);
+    if (!['https:', 'http:'].includes(parsed.protocol) || parsed.username || parsed.password) return el('span', label);
+    const box = el('span', undefined, 'documentation-copy');
+    if (label !== url) box.append(el('span', label, 'documentation-label'));
+    const address = el('input'); address.type = 'text'; address.readOnly = true; address.value = parsed.href;
+    address.setAttribute('aria-label', `${label === url ? '文档' : label}网址`);
+    address.onclick = () => address.select();
+    const button = el('button', '复制网址'); button.type = 'button';
+    const feedback = el('span', '复制网址后，在浏览器地址栏粘贴查看。', 'hint');
+    feedback.setAttribute('role', 'status');
+    button.onclick = async () => {
+      address.focus(); address.select();
+      let copied = false;
+      try { copied = document.execCommand('copy'); } catch { /* Clipboard may be restricted by the host. */ }
+      if (!copied && navigator.clipboard?.writeText) {
+        try { await navigator.clipboard.writeText(address.value); copied = true; } catch { /* Keep manual copying available. */ }
+      }
+      feedback.textContent = copied ? '网址已复制，请粘贴到浏览器查看。' : '网址已选中，请按 Ctrl+C / ⌘C 或长按复制。';
+      if (!copied) { address.focus(); address.select(); }
+    };
+    box.append(address, button, feedback);
+    return box;
+  } catch { return el('span', label); }
+}
+function descriptionText(text, className = 'muted') {
+  const paragraph = el('p', undefined, className);
+  const source = String(text || ''); let offset = 0;
+  for (const match of source.matchAll(/https?:\/\/[^\s<>"'，。；）]+/g)) {
+    paragraph.append(document.createTextNode(source.slice(offset, match.index)), documentationLink(match[0], match[0]));
+    offset = match.index + match[0].length;
+  }
+  paragraph.append(document.createTextNode(source.slice(offset)));
+  return paragraph;
+}
+function referenceLink(info) {
+  return documentationLink(info.documentation, info.documentation.startsWith('https://github.com/facebook/facebook-python-business-sdk/') ? '官方 SDK 参考' : '官方字段与接口说明');
+}
 function confirmAction(title, text, button = '确认') {
   $('confirm-title').textContent = title;
   $('confirm-text').textContent = text;
@@ -74,10 +113,10 @@ function operationCard(item) {
   actions.append(actionButton('编辑', () => openEditor(item)), actionButton(item.enabled === false ? '启用' : '停用', () => toggle(item)), actionButton('删除', () => remove(item), 'danger'));
   const heading = el('div', undefined, 'operation-heading'); heading.append(top, actions);
   const details = el('details', undefined, 'operation-details');
-  details.append(el('summary', '接口详情'), el('p', item.request.url, 'endpoint'), el('p', item.description, 'muted'));
+  details.append(el('summary', '接口详情'), el('p', item.request.url, 'endpoint'), descriptionText(item.description));
   const name = el('p', state.tool_names?.[item.name] || item.tool_name || `api_${item.name}`, 'operation-call-name');
   card.append(heading, name); if (info?.explanation) card.append(el('p', `${info.category_label} · ${info.explanation}`, 'operation-explanation'));
-  if (info?.documentation) { const link = el('a', '官方 SDK 参考'); link.href = info.documentation; link.target = '_blank'; link.rel = 'noopener noreferrer'; details.append(link); }
+  if (info?.documentation) details.append(referenceLink(info));
   card.append(details); return card;
 }
 function clearOperationFilters() {
@@ -160,7 +199,7 @@ function openConnection(connection) {
     const info = operationInfo(item);
     const control = checkbox(item.enabled !== false); control.dataset.operationName = item.name;
     const label = el('label', item.display_name || item.name, 'check'); label.prepend(control);
-    const row = el('div', undefined, 'connection-permission'); row.dataset.category = info?.category || 'other'; row.dataset.categoryLabel = info?.category_label || '其他操作'; row.dataset.method = item.request.method; row.dataset.search = [item.display_name, item.connection.operation, item.description, item.request.url, info?.explanation || '', info?.category_label || '', info?.title || ''].join(' ').toLowerCase(); row.append(label, el('span', item.request.method, 'method')); if (info?.explanation) row.append(el('p', info.explanation, 'operation-explanation')); $('connection-operations').append(row);
+    const row = el('div', undefined, 'connection-permission'); row.dataset.category = info?.category || 'other'; row.dataset.categoryLabel = info?.category_label || '其他操作'; row.dataset.method = item.request.method; row.dataset.search = [item.display_name, item.connection.operation, item.description, item.request.url, info?.explanation || '', info?.category_label || '', info?.title || ''].join(' ').toLowerCase(); row.append(label, el('span', item.request.method, 'method')); if (info?.explanation) row.append(el('p', info.explanation, 'operation-explanation')); if (info?.documentation) { const detail = el('details', undefined, 'operation-details'); detail.append(el('summary', '字段与接口说明'), descriptionText(item.description), referenceLink(info)); row.append(detail); } $('connection-operations').append(row);
   }
   setupPermissionFilters('connection');
   $('connection-editor').showModal();
@@ -437,8 +476,8 @@ function renderPlatform() {
     const row = el('div', undefined, 'operation-row'); row.dataset.category = operation.category || 'other'; row.dataset.categoryLabel = operation.category_label || '其他操作'; row.dataset.method = operation.method; row.dataset.search = [operation.title, operation.id, operation.path, operation.description, operation.explanation || '', operation.category_label || ''].join(' ').toLowerCase();
     const control = checkbox(false); control.dataset.operationId = operation.id;
     const title = el('label', operation.title, 'check'); title.prepend(control);
-    const detail = el('details'); detail.append(el('summary', '查看接口与参数'), el('p', `${operation.method} ${operation.path}`, 'hint'), el('p', operation.description, 'hint'));
-    const link = el('a', '官方文档'); link.href = operation.documentation; link.target = '_blank'; link.rel = 'noopener noreferrer'; detail.append(link);
+    const detail = el('details'); detail.append(el('summary', '查看接口与参数'), el('p', `${operation.method} ${operation.path}`, 'hint'), descriptionText(operation.description, 'hint'));
+    if (operation.documentation) detail.append(referenceLink(operation));
     row.append(title, el('span', operation.method, 'method')); if (operation.explanation) row.append(el('p', `${operation.category_label} · ${operation.explanation}`, 'operation-explanation')); row.append(detail); $('platform-operations').append(row);
   }
   setupPermissionFilters('platform');
