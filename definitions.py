@@ -6,6 +6,8 @@ import json
 import re
 import unicodedata
 from dataclasses import dataclass, replace
+from dataclasses import field as dataclass_field
+from functools import lru_cache
 from urllib.parse import urlsplit
 
 from jsonschema import Draft202012Validator
@@ -81,6 +83,7 @@ class Definition:
     display_name: str = ""
 
     tool_name: str = ""
+    connection: dict = dataclass_field(default_factory=dict)
 
 
 def _slug(text, fallback):
@@ -128,15 +131,20 @@ def _walk(value):
             yield from _walk(child)
 
 
+@lru_cache(maxsize=2048)
+def check_parameter_schema(serialized):
+    Draft202012Validator.check_schema(json.loads(serialized))
+
+
 def parse_definitions(raw: str) -> list[Definition]:
-    if not isinstance(raw, str) or len(raw) > 1_000_000:
-        raise DefinitionError("tools_json 必须是小于 1 MB 的 JSON 文本")
+    if not isinstance(raw, str) or len(raw) > 32_000_000:
+        raise DefinitionError("tools_json 必须是小于 32 MB 的 JSON 文本")
     try:
         values = json.loads(raw, parse_constant=lambda _: (_ for _ in ()).throw(ValueError()))
     except (ValueError, RecursionError) as exc:
         raise DefinitionError("tools_json 不是有效 JSON") from exc
-    if not isinstance(values, list) or len(values) > 200:
-        raise DefinitionError("tools_json 必须是数组，最多 200 个工具")
+    if not isinstance(values, list) or len(values) > 10000:
+        raise DefinitionError("tools_json 必须是数组，最多 10000 个工具")
     from .platforms import upgrade_advertiser
 
     values = upgrade_advertiser(values)
@@ -149,6 +157,10 @@ def parse_definitions(raw: str) -> list[Definition]:
             error = errors[0]
             location = ".".join(str(x) for x in error.absolute_path) or "定义"
             raise DefinitionError(f"{prefix}.{location} 不符合 {error.validator} 规则")
+        if value.get("connection", {}).get("platform") == "meta_marketing":
+            from .meta_platform import validate_preset
+
+            validate_preset(value)
         name = value["name"]
         if name in names:
             raise DefinitionError(f"{prefix}: 工具名称重复")
@@ -164,7 +176,7 @@ def parse_definitions(raw: str) -> list[Definition]:
             raise DefinitionError(f"{prefix}.parameters 暂不支持 schema 引用")
         parameters.setdefault("additionalProperties", False)
         try:
-            Draft202012Validator.check_schema(parameters)
+            check_parameter_schema(json.dumps(parameters, sort_keys=True))
         except SchemaError as exc:
             raise DefinitionError(f"{prefix}.parameters 不是有效 JSON Schema") from exc
         props = parameters.get("properties", {})
@@ -236,6 +248,7 @@ def parse_definitions(raw: str) -> list[Definition]:
                 copy.deepcopy(value.get("response", {})),
                 display_name,
                 suggested_tool_name(value),
+                copy.deepcopy(value.get("connection", {})),
             )
         )
     counts = {}

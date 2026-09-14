@@ -213,6 +213,57 @@ async def main():
     assert plugin.tools[0].name == "Ninety_retention"
     assert not previous.available
     assert plugin.tools[0].definition.request == previous.definition.request
+    # Meta catalog is independent of card plugins; closed permissions invalidate queued calls.
+    meta_connected = await web_call(
+        plugin.page_connect_platform,
+        {
+            "revision": plugin.catalog.snapshot()["revision"],
+            "platform_id": "meta_marketing",
+            "name": "Meta 后台账户",
+            "call_name": "Meta_Main",
+            "token": "synthetic-meta-key",
+            "enabled_operations": ["get_adaccounts", "post_campaigns"],
+        },
+    )
+    assert meta_connected.status_code == 200
+    assert len(plugin.tools) == 3
+    meta_tools = [t for t in plugin.tools if t.name.startswith("Meta_Main_")]
+    assert {t.name for t in meta_tools} == {"Meta_Main_get_adaccounts", "Meta_Main_post_campaigns"}
+    sent = []
+
+    def meta_response(request):
+        sent.append(request)
+        return httpx.Response(200, json={"data": [{"id": "act_123"}]})
+
+    await plugin.executor.client.aclose()
+    plugin.executor.client = httpx.AsyncClient(transport=httpx.MockTransport(meta_response))
+    meta_tool = next(t for t in meta_tools if t.name == "Meta_Main_get_adaccounts")
+    assert not (await meta_tool.call(None, node_id="me")).isError
+    assert len(sent) == 1
+    plugin.executor.semaphore = asyncio.Semaphore(0)
+    queued = asyncio.create_task(meta_tool.call(None, node_id="me"))
+    await asyncio.sleep(0)
+    meta_items = [
+        item
+        for item in plugin.catalog.snapshot()["items"]
+        if item.get("connection", {}).get("platform") == "meta_marketing"
+    ]
+    meta_disabled = await web_call(
+        plugin.page_update_connection,
+        {
+            "revision": plugin.catalog.snapshot()["revision"],
+            "connection_id": meta_items[0]["connection"]["id"],
+            "name": "Meta 后台账户",
+            "enabled_names": [],
+            "token": "",
+        },
+    )
+    assert meta_disabled.status_code == 200
+    plugin.executor.semaphore.release()
+    assert (await queued).isError and len(sent) == 1
+    assert (await meta_tool.call(None, node_id="me")).isError
+    assert len(plugin.tools) == 1  # AppLovin remains independently available.
+    assert "data.plugins.astrbot_plugin_feishu_agent_card" not in sys.modules
     await plugin.terminate()
     assert manager.func_list == [foreign]
     assert not context.registered_web_apis

@@ -96,6 +96,9 @@ def sanitize_error(text, request):
             secrets.extend(
                 [value, quote(value, safe=""), quote_plus(value), json.dumps(value)[1:-1]]
             )
+            if value.lower().startswith("bearer ") and value[7:]:
+                bare = value[7:]
+                secrets.extend([bare, quote(bare, safe=""), quote_plus(bare)])
 
     collect(request)
     collect(request.get("headers", {}), True)
@@ -119,16 +122,17 @@ class Executor:
         self.history = deque(maxlen=50)
         self.semaphore = asyncio.Semaphore(4)
         self.closed = False
+        self.permitted = lambda connection_id, operation: False
 
     async def close(self):
         self.closed = True
         await self.client.aclose()
 
-    async def execute(self, definition: Definition, arguments: dict) -> dict:
+    async def execute(self, definition: Definition, arguments: dict, guard=lambda: True) -> dict:
         started = time.monotonic()
         result = {"ok": False, "tool": definition.tool_name}
         try:
-            if self.closed or not definition.enabled:
+            if self.closed or not definition.enabled or not guard():
                 raise ExecutionError("工具已停用或插件已卸载")
             arguments = copy.deepcopy(arguments)
             for key, schema in definition.parameters.get("properties", {}).items():
@@ -186,8 +190,17 @@ class Executor:
                         if "content-type" not in headers:
                             headers["content-type"] = "application/json"
                         kwargs["headers"] = headers
+            is_meta = definition.connection.get("platform") == "meta_marketing"
+            if is_meta:
+                from .meta_platform import prepare
+
+                url, kwargs = prepare(definition, arguments, self.permitted)
             # No retries: a failed connection may still have caused a write on the remote service.
             async with self.semaphore:
+                if self.closed or not guard():
+                    raise ExecutionError("工具已更新、停用或插件已卸载，请重新选择工具")
+                if is_meta:
+                    url, kwargs = prepare(definition, arguments, self.permitted)
                 async with asyncio.timeout(request.get("timeout", 30)):
                     async with self.client.stream(
                         request["method"],
@@ -226,6 +239,22 @@ class Executor:
                     data = text
             else:
                 data = None
+            if is_meta:
+                from .meta_platform import redact_response
+
+                data = redact_response(data, request["headers"]["Authorization"][7:])
+                if isinstance(data, dict) and data.get("error"):
+                    result.update(
+                        error="Meta 返回业务错误；未自动重试",
+                        error_detail=sanitize_error(
+                            json.dumps(data["error"], ensure_ascii=False), request
+                        ),
+                    )
+                    return result
+                if isinstance(data, dict) and data.get("paging"):
+                    result["pagination"] = (
+                        "返回单页；使用 paging.cursors.after 在相同操作中继续，不接受 next URL。"
+                    )
             try:
                 selected = extract(data, definition.response.get("pointer", ""))
             except (KeyError, IndexError, ValueError) as exc:

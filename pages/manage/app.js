@@ -127,7 +127,7 @@ function renderList() {
     const header = el('div', undefined, 'connection-header');
     const heading = el('div'); heading.append(el('h2', connection.name), el('p', `${all.length} 个操作 · ${all.filter((item) => item.enabled !== false).length} 个启用`, 'muted'));
     const actions = el('div', undefined, 'card-actions'); actions.append(actionButton('进入账户', () => enterAccount(connection)), actionButton('删除接入', () => deleteConnection(connection), 'danger'));
-    const brand = el('div', undefined, 'integration-head'); brand.append(el('strong', 'AppLovin Report'), el('span', all.some((item) => item.enabled !== false) ? '● 已启用' : '未启用', 'badge'));
+    const brand = el('div', undefined, 'integration-head'); brand.append(el('strong', platforms.find((p) => p.id === connection.platform)?.name || (connection.platform === 'meta_marketing' ? 'Meta 广告管理' : 'AppLovin Report')), el('span', all.some((item) => item.enabled !== false) ? '● 已启用' : '未启用', 'badge'));
     heading.className = 'integration-body';
     header.append(brand, heading, actions);
     card.append(header); list.append(card);
@@ -142,8 +142,9 @@ function openConnection(connection) {
   for (const item of state.items.filter((value) => value.connection?.id === connection.id)) {
     const control = checkbox(item.enabled !== false); control.dataset.operationName = item.name;
     const label = el('label', item.display_name || item.name, 'check'); label.prepend(control);
-    const row = el('div', undefined, 'connection-permission'); row.append(label, el('span', item.request.method, 'method')); $('connection-operations').append(row);
+    const row = el('div', undefined, 'connection-permission'); row.dataset.method = item.request.method; row.dataset.search = [item.display_name, item.connection.operation, item.description, item.request.url].join(' ').toLowerCase(); row.append(label, el('span', item.request.method, 'method')); $('connection-operations').append(row);
   }
+  setupPermissionFilters('connection');
   $('connection-editor').showModal();
 }
 async function closeConnection() {
@@ -384,8 +385,9 @@ function renderPlatformCards() {
   const cards = platforms.filter((p) => p.name.toLowerCase().includes(term)).map((platform) => {
     const card = el('article', undefined, 'integration-card');
     const head = el('div', undefined, 'integration-head'); head.append(el('strong', platform.name), el('span', '可接入', 'badge'));
-    const body = el('div', undefined, 'integration-body'); body.append(el('p', '广告投放、收益与用户表现报表', 'muted'), el('p', `${platform.operations.length} 个操作 · 独立账户与权限`, 'hint'));
+    const body = el('div', undefined, 'integration-body'); body.append(el('p', platform.summary || '广告投放、收益与用户表现报表', 'muted'), el('p', `${platform.operations.length} 个操作 · 独立账户与权限`, 'hint'));
     const footer = el('div', undefined, 'integration-actions'); footer.append(actionButton('添加账户', () => {
+      if ($('platform-select').value !== platform.id) $('platform-token').value = '';
       $('platform-select').value = platform.id; $('platform-market').hidden = true; $('platform-setup').hidden = false;
       $('platform-setup-title').textContent = platform.name; renderPlatform(); updatePlatformPreview(); displayMode('platform');
     }, 'primary'));
@@ -396,7 +398,7 @@ function renderPlatformCards() {
 }
 function updatePlatformPreview() {
   const platform = platforms.find((p) => p.id === $('platform-select').value);
-  $('platform-name-preview').textContent = `调用示例：${$('platform-call-name').value.trim() || 'Ninety_Report'}_${platform?.operations[0]?.id || 'operation'}`;
+  $('platform-name-preview').textContent = `调用示例：${$('platform-call-name').value.trim() || 'Ninety_Report'}_${(platform?.id === 'meta_marketing' ? 'get_adaccounts' : platform?.operations[0]?.id) || 'operation'}`;
 }
 $('platform-call-name').oninput = updatePlatformPreview;
 $('platform-search').oninput = renderPlatformCards;
@@ -411,15 +413,17 @@ function renderPlatform() {
   const platform = platforms.find((item) => item.id === $('platform-select').value);
   $('platform-description').textContent = platform?.description || '平台列表尚未就绪，请刷新页面重试，或使用手动填写方式。';
   $('platform-token-label').textContent = platform?.token_label || 'Token';
+  $('platform-token').placeholder = `填写 ${platform?.token_label || 'Token'}`;
   $('platform-operations').replaceChildren();
   for (const operation of platform?.operations || []) {
-    const row = el('div', undefined, 'operation-row');
+    const row = el('div', undefined, 'operation-row'); row.dataset.method = operation.method; row.dataset.search = [operation.title, operation.id, operation.path, operation.description].join(' ').toLowerCase();
     const control = checkbox(false); control.dataset.operationId = operation.id;
     const title = el('label', operation.title, 'check'); title.prepend(control);
-    const detail = el('details'); detail.append(el('summary', '查看接口与默认字段'), el('p', `${operation.method} ${operation.path}`, 'hint'), el('p', operation.description, 'hint'));
+    const detail = el('details'); detail.append(el('summary', '查看接口与参数'), el('p', `${operation.method} ${operation.path}`, 'hint'), el('p', operation.description, 'hint'));
     const link = el('a', '官方文档'); link.href = operation.documentation; link.target = '_blank'; link.rel = 'noopener noreferrer'; detail.append(link);
     row.append(title, el('span', operation.method, 'method'), detail); $('platform-operations').append(row);
   }
+  setupPermissionFilters('platform');
 }
 $('platform-token').oninput = () => notice('', false, true);
 $('platform-select').onchange = () => { $('platform-token').value = ''; renderPlatform(); displayMode(mode); };
@@ -428,7 +432,7 @@ async function savePlatform() {
   const callName = $('platform-call-name').value.trim();
   if (!/^[A-Za-z][A-Za-z_]{0,39}$/.test(callName)) { notice('请填写调用名称：仅英文字母和下划线，英文开头，最多 40 位', true, true); return; }
   const token = $('platform-token').value;
-  if (!token.trim()) { notice('请填写 Report Key / Token', true, true); return; }
+  if (!token.trim()) { notice('请填写当前平台的 Token', true, true); return; }
   const enabled_operations = [...$('platform-operations').querySelectorAll('input:checked')].map((control) => control.dataset.operationId);
   lockEditor(true);
   try {
@@ -460,3 +464,30 @@ try {
   if (!bridge) throw new Error('请从 AstrBot 插件详情中的「API 管理」打开此页面。');
   await bridge.ready(); await refresh(); void loadPlatforms();
 } catch (error) { notice(error.message, true); $('list').replaceChildren(); $('add').disabled = true; }
+
+function setupPermissionFilters(prefix) {
+  const container = $(`${prefix}-operations`);
+  $(`${prefix}-permission-search`).value = ''; $(`${prefix}-permission-method`).value = '';
+  const update = () => {
+    const term = $(`${prefix}-permission-search`).value.trim().toLowerCase();
+    const method = $(`${prefix}-permission-method`).value;
+    let shown = 0, enabled = 0;
+    for (const row of container.children) {
+      row.hidden = !!((method && row.dataset.method !== method) || (term && !row.dataset.search.includes(term)));
+      if (!row.hidden) shown++;
+      if (row.querySelector('input').checked) enabled++;
+    }
+    $(`${prefix}-permission-count`).textContent = `显示 ${shown} / ${container.children.length} 个操作 · 已选 ${enabled} 个`;
+  };
+  $(`${prefix}-permission-search`).oninput = update;
+  $(`${prefix}-permission-method`).onchange = update;
+  container.onchange = update;
+  for (const [action, checked] of [['enable', true], ['disable', false]]) {
+    $(`${prefix}-permission-${action}`).onclick = () => {
+      for (const row of container.children) if (!row.hidden) row.querySelector('input').checked = checked;
+      if (prefix === 'connection') connectionDirty = true; else dirty = true;
+      update();
+    };
+  }
+  update();
+}

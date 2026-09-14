@@ -55,3 +55,12 @@ main{max-width:1240px;padding:30px 28px}header{margin-bottom:24px}
 #account-operation-list .operation-heading{align-items:center}#account-operation-list .operation-card .card-actions button.danger{border-color:transparent;background:transparent}#account-operation-list .operation-card .card-actions button.danger:hover{background:var(--error-bg)}
 #platform-load-error{font-size:13px;display:flex;justify-content:space-between;gap:12px;align-items:center}#platform-load-error button{flex-shrink:0}
 @media(max-width:640px){.account-page-head{padding:16px}.account-page-head h2{font-size:20px}#account-operation-list .operation-heading{align-items:flex-start}#platform-load-error{flex-wrap:wrap}}
+
+/* Large platform catalogs keep permission filtering close to the choices. */
+.permission-filters { display: flex; gap: 12px; align-items: end; flex-wrap: wrap; margin: 18px 0 8px; }
+.permission-filters label:first-child { flex: 1 1 260px; }
+.permission-filters label { margin: 0; }
+.permission-filters button { min-height: 40px; }
+#platform-operations, #connection-operations { max-height: 48vh; overflow: auto; overscroll-behavior: contain; border-top: 1px solid var(--border); }
+.operation-row[hidden], .connection-permission[hidden] { display: none; }
+@media(max-width: 650px) { .permission-filters label:first-child { flex-basis: 100%; } .permission-filters button { flex: 1; } }

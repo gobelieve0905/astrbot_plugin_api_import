@@ -198,7 +198,9 @@ def run():
         assert page.locator("#panel-platform").is_visible()
         assert page.locator("#tab-auto").count() == 0
         page.screenshot(path=str(output / "platform-market.png"), animations="disabled")
-        page.locator("#platform-cards").get_by_role("button", name="添加账户").click()
+        page.locator("#platform-cards .integration-card").filter(
+            has_text="AppLovin Report"
+        ).get_by_role("button", name="添加账户").click()
         assert page.locator("#platform-operations .operation-row").count() == 6
         assert page.locator("#platform-operations input:checked").count() == 0
         page.locator("#save").click()
@@ -235,7 +237,9 @@ def run():
         assert catalog.snapshot()["items"][-1]["enabled"]
         # Additional accounts do not collide, and all-off onboarding remains possible.
         page.locator("#add").click()
-        page.locator("#platform-cards").get_by_role("button", name="添加账户").click()
+        page.locator("#platform-cards .integration-card").filter(
+            has_text="AppLovin Report"
+        ).get_by_role("button", name="添加账户").click()
         page.locator("#platform-name").fill("海外投放账户")
         page.locator("#platform-call-name").fill("Overseas_Report")
         page.locator("#platform-token").fill("second-synthetic-key")
@@ -322,8 +326,61 @@ def run():
         assert page.locator("#notice.error").count() == 0
         page.unroute("**/fixture/platforms")
         page.locator("#retry-platforms").click()
-        page.locator("#platform-cards .integration-card").wait_for()
+        page.locator("#platform-cards .integration-card").first.wait_for()
         assert page.locator("#platform-load-error").is_hidden()
+        # Full Meta directory: search selects only the matching route; hidden switches survive.
+        page.set_viewport_size({"width": 1200, "height": 900})
+        page.locator("#platform-cards .integration-card").filter(
+            has_text="Meta 广告管理"
+        ).get_by_role("button", name="添加账户").click()
+        assert page.locator("#platform-operations .operation-row").count() == 714
+        assert page.locator("#platform-operations input:checked").count() == 0
+        page.locator("#platform-name").fill("Meta 国内账户")
+        page.locator("#platform-call-name").fill("Meta_Main")
+        page.locator("#platform-token").fill("synthetic-meta-browser")
+        page.locator("#platform-permission-search").fill("/adaccounts")
+        page.locator("#platform-permission-method").select_option("GET")
+        page.locator("#platform-permission-enable").click()
+        assert page.locator("#platform-operations input:checked").count() == 1
+        page.locator("#platform-permission-search").fill("/campaigns")
+        page.locator("#platform-permission-method").select_option("POST")
+        page.locator("#platform-permission-enable").click()
+        assert page.locator("#platform-operations input:checked").count() == 2
+        page.locator("#editor .dialog-body").evaluate("node => node.scrollTop = 0")
+        page.screenshot(path=str(output / "meta-setup-light.png"), animations="disabled")
+        page.locator("#save").click()
+        page.locator("#editor").wait_for(state="hidden", timeout=20000)
+        meta = [
+            item
+            for item in catalog.snapshot()["items"]
+            if item.get("connection", {}).get("platform") == "meta_marketing"
+        ]
+        assert len(meta) == 714 and sum(item["enabled"] for item in meta) == 2
+        card = page.locator(".connection-card").filter(has_text="Meta 国内账户")
+        assert "Meta 广告管理" in card.inner_text()
+        card.get_by_role("button", name="进入账户").click()
+        page.locator("#operation-search").fill("广告系列")
+        page.screenshot(path=str(output / "meta-operations.png"), animations="disabled")
+        page.locator("#account-settings").click()
+        page.locator("#connection-permission-search").fill("/campaigns")
+        page.locator("#connection-permission-method").select_option("POST")
+        page.locator("#connection-permission-disable").click()
+        assert page.locator("#connection-operations input:checked").count() == 1
+        page.set_viewport_size({"width": 390, "height": 844})
+        assert page.locator("#connection-editor").evaluate(
+            "node => node.scrollWidth <= node.clientWidth"
+        )
+        page.screenshot(path=str(output / "meta-permissions-mobile.png"), animations="disabled")
+        page.locator("#save-connection").click()
+        page.locator("#connection-editor").wait_for(state="hidden", timeout=20000)
+        meta = [
+            item
+            for item in catalog.snapshot()["items"]
+            if item.get("connection", {}).get("platform") == "meta_marketing"
+        ]
+        assert [item["connection"]["operation"] for item in meta if item["enabled"]] == [
+            "get_adaccounts"
+        ]
         assert not errors, errors
         browser.close()
     server.shutdown()

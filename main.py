@@ -33,7 +33,9 @@ class ImportedTool(FunctionTool):
         if not self.available or not self.active:
             result = {"ok": False, "error": "该工具已更新、删除或停用，请重新选择工具"}
         else:
-            result = await self.executor.execute(self.definition, kwargs)
+            result = await self.executor.execute(
+                self.definition, kwargs, guard=lambda: self.available and self.active
+            )
         return CallToolResult(
             content=[TextContent(type="text", text=json.dumps(result, ensure_ascii=False))],
             isError=not result["ok"],
@@ -105,6 +107,13 @@ class ApiImportPlugin(Star):
 
     async def initialize(self):
         self.executor = Executor(StarTools.get_data_dir("astrbot_plugin_api_import") / "results")
+        self.executor.permitted = lambda connection_id, operation: any(
+            tool.available
+            and tool.active
+            and tool.definition.connection.get("id") == connection_id
+            and tool.definition.connection.get("operation") == operation
+            for tool in self.tools
+        )
         try:
             definitions = parse_definitions(self.config.get("tools_json", "[]"))
             tools = self._prepare_tools(definitions)

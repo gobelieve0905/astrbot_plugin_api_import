@@ -156,6 +156,8 @@ def _definition(operation, token, suffix, enabled):
 
 
 def platform_catalog():
+    from .meta_platform import platform_entry
+
     return {
         "platforms": [
             {
@@ -174,13 +176,17 @@ def platform_catalog():
                     }
                     for operation in OPERATIONS
                 ],
-            }
+            },
+            platform_entry(),
         ]
     }
 
 
 def build_connection(payload, existing):
-    if payload.get("platform_id") != "applovin_report":
+    from . import meta_platform
+
+    is_meta = payload.get("platform_id") == meta_platform.PLATFORM
+    if payload.get("platform_id") not in ("applovin_report", meta_platform.PLATFORM):
         raise DefinitionError("请选择支持的平台")
     display_name = payload.get("name", "")
     if not isinstance(display_name, str) or len(display_name.strip()) > 80:
@@ -197,9 +203,11 @@ def build_connection(payload, existing):
         or len(token) > 4096
         or any(c.isspace() for c in token)
     ):
-        raise DefinitionError("请填写有效的 Report Key / Token，不要包含空格或换行")
+        raise DefinitionError("请填写有效的 Token，不要包含空格或换行")
     enabled = payload.get("enabled_operations")
-    known = {operation[0] for operation in OPERATIONS}
+    known = (
+        set(meta_platform.operations()) if is_meta else {operation[0] for operation in OPERATIONS}
+    )
     if (
         not isinstance(enabled, list)
         or any(not isinstance(item, str) for item in enabled)
@@ -210,17 +218,28 @@ def build_connection(payload, existing):
     names = {item["name"] for item in existing}
     while True:
         suffix = secrets.token_hex(4)
-        definitions = [
-            _definition(operation, token, suffix, operation[0] in enabled)
-            for operation in OPERATIONS
-        ]
+        if is_meta:
+            definitions = [
+                meta_platform.definition(op, token, suffix, op["id"] in enabled)
+                for op in meta_platform.operations().values()
+            ]
+            descriptors = [
+                (op["id"], meta_platform.title(op)) for op in meta_platform.operations().values()
+            ]
+        else:
+            definitions = [
+                _definition(operation, token, suffix, operation[0] in enabled)
+                for operation in OPERATIONS
+            ]
+            descriptors = OPERATIONS
         if not any(item["name"] in names for item in definitions):
-            for item, operation in zip(definitions, OPERATIONS, strict=True):
+            for item, operation in zip(definitions, descriptors, strict=True):
                 item["display_name"] = operation[1]
                 item["connection"] = {
                     "id": suffix,
-                    "name": display_name.strip() or "AppLovin 账户 " + suffix,
-                    "platform": "applovin_report",
+                    "name": display_name.strip()
+                    or ("Meta 账户 " if is_meta else "AppLovin 账户 ") + suffix,
+                    "platform": payload["platform_id"],
                     "operation": operation[0],
                 }
             if call_name:

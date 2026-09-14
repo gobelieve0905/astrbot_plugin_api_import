@@ -74,7 +74,12 @@ def update_connection(items, payload, delete=False):
     current_names = {item.name: item.tool_name for item in parse_definitions(json.dumps(items))}
     operations = {op[0]: op for op in OPERATIONS}
     for item in members:
-        if token:
+        if token and item["connection"]["platform"] == "meta_marketing":
+            from .meta_platform import validate_preset
+
+            validate_preset(item)
+            item["request"]["headers"]["Authorization"] = "Bearer " + token
+        elif token:
             operation = operations.get(item["connection"]["operation"])
             req = item["request"]
             if (
