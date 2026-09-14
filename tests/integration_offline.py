@@ -240,6 +240,23 @@ async def main():
     meta_tool = next(t for t in meta_tools if t.name == "Meta_Main_get_adaccounts")
     assert not (await meta_tool.call(None, node_id="me")).isError
     assert len(sent) == 1
+    # Simulate transport waiting for a connection, before any upstream side effect.
+    waiting = asyncio.Event()
+    transport_cancelled = asyncio.Event()
+
+    async def waiting_transport(request):
+        waiting.set()
+        try:
+            await asyncio.Event().wait()
+        except asyncio.CancelledError:
+            transport_cancelled.set()
+            raise
+        raise AssertionError("Revoked request must never proceed")
+
+    await plugin.executor.client.aclose()
+    plugin.executor.client = httpx.AsyncClient(transport=httpx.MockTransport(waiting_transport))
+    connecting = asyncio.create_task(meta_tool.call(None, node_id="me"))
+    await waiting.wait()
     plugin.executor.semaphore = asyncio.Semaphore(0)
     queued = asyncio.create_task(meta_tool.call(None, node_id="me"))
     await asyncio.sleep(0)
@@ -259,6 +276,9 @@ async def main():
         },
     )
     assert meta_disabled.status_code == 200
+    assert (await connecting).isError
+    assert transport_cancelled.is_set()
+    assert not meta_tool.pending_calls or all(t.done() for t in meta_tool.pending_calls)
     plugin.executor.semaphore.release()
     assert (await queued).isError and len(sent) == 1
     assert (await meta_tool.call(None, node_id="me")).isError

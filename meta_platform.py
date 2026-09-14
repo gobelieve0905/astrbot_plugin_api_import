@@ -65,6 +65,14 @@ def endpoint(op):
     return "https://graph.facebook.com/" + catalog()["api_version"] + "/{node_id}" + op["path"]
 
 
+def permission_restriction(op):
+    if op["method"] != "GET" and "batch" in op["path"]:
+        return "安全限制：此批量写入接口暂不执行，因为尚不能逐项验证内部子操作权限；即使勾选也会被后端拒绝。请使用单项操作。"
+    if op["id"] == "post_copies":
+        return "复制权限：还须同时开启创建广告系列、广告组和广告，避免复制或深度复制绕过创建开关。"
+    return ""
+
+
 def operation_help(op):
     root = (
         "https://github.com/facebook/facebook-python-business-sdk/blob/"
@@ -82,7 +90,8 @@ def operation_help(op):
     }[op["method"]]
     return {
         "permission_explanation": (
-            effect
+            permission_restriction(op)
+            + effect
             + " 此开关允许当前接入账户调用 "
             + op["method"]
             + " /{node_id}"
@@ -277,6 +286,13 @@ def prepare(definition, arguments, permitted):
     op = operations()[connection["operation"]]
     if not permitted(connection["id"], op["id"]):
         raise ExecutionError("此 Meta 操作已被后台关闭，不能通过对话开启")
+    if op["method"] != "GET" and "batch" in op["path"]:
+        raise ExecutionError(permission_restriction(op))
+    if op["id"] == "post_copies" and not all(
+        permitted(connection["id"], child)
+        for child in ("post_campaigns", "post_adsets", "post_ads")
+    ):
+        raise ExecutionError(permission_restriction(op))
     params = copy.deepcopy(arguments.get("params", {}))
 
     def inspect(value):
@@ -286,9 +302,23 @@ def prepare(definition, arguments, permitted):
                     raise ExecutionError("禁止在 Meta 参数中覆盖鉴权、方法或嵌入 Graph 批量请求")
                 if key.lower() == "fields":
                     raise ExecutionError("请使用顶层 fields 数组，禁止嵌入字段展开")
+                if (
+                    key.lower() == "status"
+                    and isinstance(child, str)
+                    and child.strip().upper() == "DELETED"
+                    and not permitted(connection["id"], "delete_node")
+                ):
+                    raise ExecutionError("删除状态需要后台同时开启删除对象操作")
                 inspect(child)
         elif isinstance(value, list):
             for child in value:
+                if (
+                    key.lower() == "status"
+                    and isinstance(child, str)
+                    and child.strip().upper() == "DELETED"
+                    and not permitted(connection["id"], "delete_node")
+                ):
+                    raise ExecutionError("删除状态需要后台同时开启删除对象操作")
                 inspect(child)
 
     inspect(params)
@@ -306,10 +336,6 @@ def prepare(definition, arguments, permitted):
         )
         if edge and not permitted(connection["id"], edge["id"]):
             raise ExecutionError("字段涉及后台未开启的关联查询，请先在后台调整对应操作")
-    if str(params.get("status", "")).upper() == "DELETED" and not permitted(
-        connection["id"], "delete_node"
-    ):
-        raise ExecutionError("删除状态需要后台同时开启删除对象操作")
     if fields:
         params["fields"] = ",".join(fields)
     files, total = {}, 0

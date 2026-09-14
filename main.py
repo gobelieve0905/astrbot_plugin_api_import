@@ -28,14 +28,34 @@ class ImportedTool(FunctionTool):
         self.definition = definition
         self.executor = executor
         self.available = True
+        self.pending_calls = set()
+
+    def invalidate(self):
+        self.available = False
+        for task in tuple(self.pending_calls):
+            task.cancel()
 
     async def call(self, context, **kwargs):
         if not self.available or not self.active:
             result = {"ok": False, "error": "该工具已更新、删除或停用，请重新选择工具"}
         else:
-            result = await self.executor.execute(
-                self.definition, kwargs, guard=lambda: self.available and self.active
+            task = asyncio.create_task(
+                self.executor.execute(
+                    self.definition, kwargs, guard=lambda: self.available and self.active
+                )
             )
+            self.pending_calls.add(task)
+            try:
+                result = await task
+            except asyncio.CancelledError:
+                if self.available:
+                    raise
+                result = {
+                    "ok": False,
+                    "error": "后台已更新或停用工具，本地调用已取消；若请求已经发出，远端可能已执行，请核实状态，勿自动重试写操作",
+                }
+            finally:
+                self.pending_calls.discard(task)
         return CallToolResult(
             content=[TextContent(type="text", text=json.dumps(result, ensure_ascii=False))],
             isError=not result["ok"],
@@ -100,7 +120,7 @@ class ApiImportPlugin(Star):
             self.config["tools_json"] = previous_raw
             raise
         for tool in self.tools:
-            tool.available = False
+            tool.invalidate()
         self.tools = new_tools
         self.definitions = definitions
         self.configuration_error = None
@@ -233,7 +253,7 @@ class ApiImportPlugin(Star):
     async def terminate(self):
         self.closed = True
         for tool in self.tools:
-            tool.available = False
+            tool.invalidate()
         self.context.registered_web_apis[:] = [
             route for route in self.context.registered_web_apis if route[1] not in self.web_handlers
         ]
