@@ -269,6 +269,8 @@ class Executor:
             if is_meta:
                 from .meta_platform import redact_response
 
+                raw_paging = data.get("paging", {}) if isinstance(data, dict) else {}
+                has_more = bool(raw_paging.get("next")) if isinstance(raw_paging, dict) else False
                 data = redact_response(data, request["headers"]["Authorization"][7:])
                 if isinstance(data, dict) and data.get("error"):
                     result.update(
@@ -288,7 +290,36 @@ class Executor:
                 raise ExecutionError("响应中不存在配置的 JSON Pointer 路径") from exc
             serialized = json.dumps(selected, ensure_ascii=False)
             limit = definition.response.get("preview_chars", 4000)
+            if is_meta and definition.connection.get("operation") == "get_adaccounts":
+                # Account discovery is compact and must not silently hide later accounts.
+                limit = max(limit, 64000)
             result.update(ok=True, bytes=size, truncated=len(serialized) > limit)
+            if is_meta and isinstance(data, dict) and isinstance(data.get("data"), list):
+                paging = data.get("paging", {})
+                cursors = paging.get("cursors", {}) if isinstance(paging, dict) else {}
+                rows = len(data["data"])
+                result["page"] = {
+                    "row_count": rows,
+                    "has_more": has_more,
+                    "after": cursors.get("after") if has_more else None,
+                    "response_complete": not result["truncated"],
+                    "scope": "仅当前对象的本页，不代表所有账户或全部分页",
+                }
+                if result["truncated"]:
+                    result["page"]["retry_current_page_limit"] = max(
+                        1, min(rows - 1, int(rows * limit / len(serialized) / 2))
+                    )
+                    result["page"]["next_step"] = (
+                        "当前预览不完整：保持当前 node_id、筛选及输入 after，缩小 params.limit 重取本页；不要跳到下一页。"
+                    )
+                elif has_more:
+                    result["page"]["next_step"] = (
+                        "保持当前对象与查询条件，用 page.after 作为 params.after 继续查询。"
+                    )
+                else:
+                    result["page"]["next_step"] = (
+                        "本页完整且没有下一页；仍需核对其他相关账户与项目关联，不能以账户名称排除其他账户。"
+                    )
             if len(serialized) > limit:
                 result["preview"] = serialized[:limit]
             else:

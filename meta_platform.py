@@ -72,12 +72,15 @@ def tool_guidance(operation_id):
     if len(objects) > 12:
         scope += f" 等 {len(objects)} 类对象，完整范围请查看后台操作说明"
     if operation_id == "get_adaccounts":
-        scope += (
-            "。查询当前用户可访问的广告账户使用 node_id=me；路径为 /me/adaccounts（不含下划线）"
-        )
+        scope += "。查询当前用户可访问的广告账户使用 node_id=me；路径为 /me/adaccounts（不含下划线）。必须遍历完整账户列表及分页；账户名称不能证明项目归属，不能仅凭名称关键词排除其他账户，也不能找到一个同名账户就停止。使用后台已开启的广告/广告组等查询核对应用标识、promoted_object 或其他明确项目映射；无法核实时列出未核实范围，不得称为全量结果"
     elif operation_id == "get_ad_accounts":
         scope += "。此接口不能用于发现当前用户的广告账户，不接受 node_id=me；用户账户列表需使用另一个已授权的 get_adaccounts 操作"
-    return scope + "。不要凭接口名称相似而替换对象类型或绕过后台权限。"
+    if operation_id == "get_insights":
+        scope += "。只返回当前 node_id 的单页报表，不代表全部相关账户。跨账户汇总先核实项目与账户/广告的关联，遍历相关账户和分页后再聚合排序；未核实账户、截断或未读分页必须说明。返回文件仅是本次响应，不等于已经读取、分析完整数据。"
+    return (
+        scope
+        + "。请检查 page 信息；预览截断时先缩小 limit 重取当前页，不能直接用下一页游标跳过未读数据。不要凭接口名称相似而替换对象类型或绕过后台权限。"
+    )
 
 
 def permission_restriction(op):
@@ -314,31 +317,24 @@ def prepare(definition, arguments, permitted):
         )
     params = copy.deepcopy(arguments.get("params", {}))
 
-    def inspect(value):
+    def inspect(value, parent_key=""):
         if isinstance(value, dict):
             for key, child in value.items():
                 if key.lower() in RESERVED - {"fields"}:
                     raise ExecutionError("禁止在 Meta 参数中覆盖鉴权、方法或嵌入 Graph 批量请求")
                 if key.lower() == "fields":
                     raise ExecutionError("请使用顶层 fields 数组，禁止嵌入字段展开")
-                if (
-                    key.lower() == "status"
-                    and isinstance(child, str)
-                    and child.strip().upper() == "DELETED"
-                    and not permitted(connection["id"], "delete_node")
-                ):
-                    raise ExecutionError("删除状态需要后台同时开启删除对象操作")
-                inspect(child)
+                inspect(child, key.lower())
         elif isinstance(value, list):
             for child in value:
-                if (
-                    key.lower() == "status"
-                    and isinstance(child, str)
-                    and child.strip().upper() == "DELETED"
-                    and not permitted(connection["id"], "delete_node")
-                ):
-                    raise ExecutionError("删除状态需要后台同时开启删除对象操作")
-                inspect(child)
+                inspect(child, parent_key)
+        elif (
+            parent_key == "status"
+            and isinstance(value, str)
+            and value.strip().upper() == "DELETED"
+            and not permitted(connection["id"], "delete_node")
+        ):
+            raise ExecutionError("删除状态需要后台同时开启删除对象操作")
 
     inspect(params)
     fields = arguments.get("fields", [])
