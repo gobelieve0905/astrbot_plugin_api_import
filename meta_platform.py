@@ -65,6 +65,21 @@ def endpoint(op):
     return "https://graph.facebook.com/" + catalog()["api_version"] + "/{node_id}" + op["path"]
 
 
+def tool_guidance(operation_id):
+    op = operations()[operation_id]
+    objects = sorted({source["object"] for source in op["sources"]})
+    scope = "适用 SDK 对象：" + ", ".join(objects[:12])
+    if len(objects) > 12:
+        scope += f" 等 {len(objects)} 类对象，完整范围请查看后台操作说明"
+    if operation_id == "get_adaccounts":
+        scope += (
+            "。查询当前用户可访问的广告账户使用 node_id=me；路径为 /me/adaccounts（不含下划线）"
+        )
+    elif operation_id == "get_ad_accounts":
+        scope += "。此接口不能用于发现当前用户的广告账户，不接受 node_id=me；用户账户列表需使用另一个已授权的 get_adaccounts 操作"
+    return scope + "。不要凭接口名称相似而替换对象类型或绕过后台权限。"
+
+
 def permission_restriction(op):
     if op["method"] != "GET" and "batch" in op["path"]:
         return "安全限制：此批量写入接口暂不执行，因为尚不能逐项验证内部子操作权限；即使勾选也会被后端拒绝。请使用单项操作。"
@@ -293,6 +308,10 @@ def prepare(definition, arguments, permitted):
         for child in ("post_campaigns", "post_adsets", "post_ads")
     ):
         raise ExecutionError(permission_restriction(op))
+    if op["id"] == "get_ad_accounts" and arguments.get("node_id") == "me":
+        raise ExecutionError(
+            "当前用户账户发现应使用 get_adaccounts（/me/adaccounts，无下划线）；get_ad_accounts 只适用于合作广告配置或信用账单组。请选择后台已开启的 get_adaccounts，未开启时请联系管理员，不能绕过权限。"
+        )
     params = copy.deepcopy(arguments.get("params", {}))
 
     def inspect(value):

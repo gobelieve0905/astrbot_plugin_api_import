@@ -116,9 +116,14 @@ def sanitize_error(text, request):
 
 
 class Executor:
-    def __init__(self, data_dir: Path, client=None):
+    def __init__(self, data_dir: Path, client=None, *, meta_proxy=None):
         self.data_dir = Path(data_dir)
         self.client = client or httpx.AsyncClient(follow_redirects=False, trust_env=False)
+        self.meta_client = (
+            httpx.AsyncClient(proxy=meta_proxy, follow_redirects=False, trust_env=False)
+            if meta_proxy
+            else None
+        )
         self.history = deque(maxlen=50)
         self.semaphore = asyncio.Semaphore(4)
         self.closed = False
@@ -127,6 +132,8 @@ class Executor:
     async def close(self):
         self.closed = True
         await self.client.aclose()
+        if self.meta_client is not None:
+            await self.meta_client.aclose()
 
     async def execute(self, definition: Definition, arguments: dict, guard=lambda: True) -> dict:
         started = time.monotonic()
@@ -206,7 +213,12 @@ class Executor:
                 if is_meta:
                     url, kwargs = prepare(definition, arguments, self.permitted)
                 async with asyncio.timeout(request.get("timeout", 30)):
-                    async with self.client.stream(
+                    client = (
+                        self.meta_client
+                        if is_meta and self.meta_client is not None
+                        else self.client
+                    )
+                    async with client.stream(
                         request["method"],
                         url,
                         **kwargs,
@@ -279,8 +291,18 @@ class Executor:
                 )
                 result["file"] = str(path.resolve())
                 result["file_scope"] = "完整单次响应（未自动分页）；服务器本地 JSON 文件"
-        except (httpx.HTTPError, TimeoutError):
+        except (httpx.HTTPError, TimeoutError) as exc:
             result["error"] = "网络请求失败或超时；未自动重试，写入操作结果可能未知"
+            result["network_error_type"] = type(exc).__name__
+            result["network_route"] = (
+                "configured_proxy"
+                if definition.connection.get("platform") == "meta_marketing"
+                and self.meta_client is not None
+                else "direct"
+            )
+            result["network_hint"] = (
+                "请检查服务器网络和代理路由；网络失败不代表账号 ID、Token 或后台操作权限无效。"
+            )
         except ExecutionError as exc:
             result["error"] = str(exc)
         except (ValueError, TypeError, LookupError):

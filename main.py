@@ -19,9 +19,14 @@ from .platforms import platform_catalog
 
 class ImportedTool(FunctionTool):
     def __init__(self, definition, executor):
+        description = definition.description
+        if definition.connection.get("platform") == "meta_marketing":
+            from .meta_platform import tool_guidance
+
+            description += " " + tool_guidance(definition.connection["operation"])
         super().__init__(
             name=definition.tool_name,
-            description=definition.description,
+            description=description,
             parameters=definition.parameters,
         )
         self.display_name = definition.display_name
@@ -126,7 +131,10 @@ class ApiImportPlugin(Star):
         self.configuration_error = None
 
     async def initialize(self):
-        self.executor = Executor(StarTools.get_data_dir("astrbot_plugin_api_import") / "results")
+        self.executor = Executor(
+            StarTools.get_data_dir("astrbot_plugin_api_import") / "results",
+            meta_proxy=self.context.get_config().get("http_proxy") or None,
+        )
         self.executor.permitted = lambda connection_id, operation: any(
             tool.available
             and tool.active

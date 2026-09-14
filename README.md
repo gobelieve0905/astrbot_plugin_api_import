@@ -35,6 +35,8 @@
 
 当前目录来自 [Meta 官方 Business SDK v26.0.1 的固定提交](https://github.com/facebook/facebook-python-business-sdk/tree/5286888addfe3ba3718db65fbf132bd66de3ddfe)，使用 Graph v26.0，包含 **714 个按请求方法和路径合并的操作**，覆盖 SDK 的广告与相关业务资产接口。SDK 别名共用一个权限项，完整路径与适用对象可在操作详情中查看。此目录不代表所有未来版本或 SDK 未公开的 Graph API。
 
+Meta 请求沿用 AstrBot 全局 `http_proxy` 配置（修改后重载插件），其他手动接口及 AppLovin 保持原网络路径。代理服务自身也需要将 `graph.facebook.com` 路由到可用出口；仅填写代理地址并不保证网络畅通。代理失败不会自动直连回退或重试。当前用户账户发现使用 `get_adaccounts`、`node_id=me`，不要使用仅适用于合作广告配置或信用账单组的 `get_ad_accounts`。
+
 所有操作默认关闭。接入和账户设置均支持关键词、请求方法筛选与批量启停筛选结果；未显示的开关保留原值。**Agent 无法通过对话开启后台关闭的操作**；后台保存后，旧工具引用和尚未发出的排队请求会被拦截。已经发出的请求无法撤回。
 
 安全限制：8 个目录内批量写入接口因不能逐项验证子操作权限，暂时拒绝执行，即使勾选也不会发送。对象复制还要求同时开启创建广告系列、广告组和广告。删除状态（包括结构化嵌套参数）需要删除对象权限。后台保存后会取消旧工具的本地等待任务；已经发送的请求仍须核实远端状态。详见 [2026-09-14 权限检查报告](https://github.com/gobelieve0905/astrbot_plugin_api_import/blob/develop/docs/META_PERMISSION_AUDIT_2026-09-14.md)。

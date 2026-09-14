@@ -32,6 +32,7 @@ async def main():
     sys.modules[package.__name__] = package
     module = importlib.import_module(package.__name__ + ".main")
     context = Context.__new__(Context)
+    context._config = {"http_proxy": ""}
     context.provider_manager = types.SimpleNamespace(llm_tools=FuncCall())
     manager = context.get_llm_tool_manager()
     foreign = FunctionTool(name="foreign", description="unrelated", parameters={"type": "object"})
@@ -238,6 +239,8 @@ async def main():
     await plugin.executor.client.aclose()
     plugin.executor.client = httpx.AsyncClient(transport=httpx.MockTransport(meta_response))
     meta_tool = next(t for t in meta_tools if t.name == "Meta_Main_get_adaccounts")
+    assert "/me/adaccounts" in meta_tool.description
+    assert "User" in meta_tool.description
     assert not (await meta_tool.call(None, node_id="me")).isError
     assert len(sent) == 1
     # Simulate transport waiting for a connection, before any upstream side effect.
