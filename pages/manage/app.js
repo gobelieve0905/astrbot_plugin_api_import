@@ -53,7 +53,20 @@ function actionButton(label, callback, style = '') {
   button.onclick = () => Promise.resolve(callback()).catch((error) => notice(error.message, true));
   return button;
 }
+function operationInfo(item) {
+  return platforms.find((p) => p.id === item.connection?.platform)?.operations.find((o) => o.id === item.connection?.operation);
+}
+function fillCategories(select, rows) {
+  const previous = select.value;
+  const groups = new Map();
+  for (const row of rows) { const id = row.category || 'other'; const entry = groups.get(id) || { label: row.category_label || '其他操作', count: 0 }; entry.count++; groups.set(id, entry); }
+  select.replaceChildren();
+  const all = el('option', '全部分类'); all.value = ''; select.append(all);
+  for (const [id, group] of groups) { const option = el('option', `${group.label}（${group.count}）`); option.value = id; select.append(option); }
+  select.value = groups.has(previous) ? previous : '';
+}
 function operationCard(item) {
+  const info = operationInfo(item);
   const card = el('article', undefined, 'card operation-card');
   const top = el('div', undefined, 'card-top');
   top.append(el('span', item.display_name || `api_${item.name}`, 'card-title'), el('span', item.request.method, 'method'), el('span', item.enabled === false ? '已停用' : '已启用', `badge${item.enabled === false ? ' off' : ''}`));
@@ -63,17 +76,21 @@ function operationCard(item) {
   const details = el('details', undefined, 'operation-details');
   details.append(el('summary', '接口详情'), el('p', item.request.url, 'endpoint'), el('p', item.description, 'muted'));
   const name = el('p', state.tool_names?.[item.name] || item.tool_name || `api_${item.name}`, 'operation-call-name');
-  card.append(heading, name, details); return card;
+  card.append(heading, name); if (info?.explanation) card.append(el('p', `${info.category_label} · ${info.explanation}`, 'operation-explanation'));
+  if (info?.documentation) { const link = el('a', '官方 SDK 参考'); link.href = info.documentation; link.target = '_blank'; link.rel = 'noopener noreferrer'; details.append(link); }
+  card.append(details); return card;
 }
 function clearOperationFilters() {
-  $('operation-search').value = ''; $('operation-status').value = ''; $('operation-method').value = '';
+  $('operation-category').value = ''; $('operation-search').value = ''; $('operation-status').value = ''; $('operation-method').value = '';
 }
 function renderAccountOperations(items) {
   const term = $('operation-search').value.trim().toLowerCase();
   const status = $('operation-status').value, method = $('operation-method').value;
-  const matches = items.filter((item) => (!method || item.request.method === method)
+  fillCategories($('operation-category'), items.map((item) => operationInfo(item) || {}));
+  const category = $('operation-category').value;
+  const matches = items.filter((item) => (!category || (operationInfo(item)?.category || 'other') === category) && (!method || item.request.method === method)
     && (!status || (item.enabled !== false) === (status === 'enabled'))
-    && [item.name, item.display_name || '', state.tool_names?.[item.name] || item.tool_name || '', item.request.url, item.description].some((value) => value.toLowerCase().includes(term)));
+    && [item.name, item.display_name || '', state.tool_names?.[item.name] || item.tool_name || '', item.request.url, item.description, operationInfo(item)?.explanation || '', operationInfo(item)?.title || ''].some((value) => value.toLowerCase().includes(term)));
   $('operation-count').textContent = `显示 ${matches.length} / ${items.length} 个操作`;
   $('account-operation-list').replaceChildren(...matches.map(operationCard));
   if (!matches.length) {
@@ -84,7 +101,7 @@ function renderAccountOperations(items) {
 }
 function enterAccount(connection) { activeAccount = connection.id; clearOperationFilters(); renderList(); }
 $('operation-search').oninput = () => renderAccountOperations(state.items.filter((item) => item.connection?.id === activeAccount));
-$('operation-status').onchange = $('operation-method').onchange = () => renderList();
+$('operation-category').onchange = $('operation-status').onchange = $('operation-method').onchange = () => renderList();
 $('clear-operation-filters').onclick = () => { clearOperationFilters(); renderList(); };
 $('back-accounts').onclick = () => { activeAccount = null; renderList(); };
 function renderList() {
@@ -140,9 +157,10 @@ function openConnection(connection) {
   $('connection-name').value = connection.name; $('connection-token').value = ''; $('connection-error').hidden = true;
   $('connection-operations').replaceChildren();
   for (const item of state.items.filter((value) => value.connection?.id === connection.id)) {
+    const info = operationInfo(item);
     const control = checkbox(item.enabled !== false); control.dataset.operationName = item.name;
     const label = el('label', item.display_name || item.name, 'check'); label.prepend(control);
-    const row = el('div', undefined, 'connection-permission'); row.dataset.method = item.request.method; row.dataset.search = [item.display_name, item.connection.operation, item.description, item.request.url].join(' ').toLowerCase(); row.append(label, el('span', item.request.method, 'method')); $('connection-operations').append(row);
+    const row = el('div', undefined, 'connection-permission'); row.dataset.category = info?.category || 'other'; row.dataset.categoryLabel = info?.category_label || '其他操作'; row.dataset.method = item.request.method; row.dataset.search = [item.display_name, item.connection.operation, item.description, item.request.url, info?.explanation || '', info?.category_label || '', info?.title || ''].join(' ').toLowerCase(); row.append(label, el('span', item.request.method, 'method')); if (info?.explanation) row.append(el('p', info.explanation, 'operation-explanation')); $('connection-operations').append(row);
   }
   setupPermissionFilters('connection');
   $('connection-editor').showModal();
@@ -416,12 +434,12 @@ function renderPlatform() {
   $('platform-token').placeholder = `填写 ${platform?.token_label || 'Token'}`;
   $('platform-operations').replaceChildren();
   for (const operation of platform?.operations || []) {
-    const row = el('div', undefined, 'operation-row'); row.dataset.method = operation.method; row.dataset.search = [operation.title, operation.id, operation.path, operation.description].join(' ').toLowerCase();
+    const row = el('div', undefined, 'operation-row'); row.dataset.category = operation.category || 'other'; row.dataset.categoryLabel = operation.category_label || '其他操作'; row.dataset.method = operation.method; row.dataset.search = [operation.title, operation.id, operation.path, operation.description, operation.explanation || '', operation.category_label || ''].join(' ').toLowerCase();
     const control = checkbox(false); control.dataset.operationId = operation.id;
     const title = el('label', operation.title, 'check'); title.prepend(control);
     const detail = el('details'); detail.append(el('summary', '查看接口与参数'), el('p', `${operation.method} ${operation.path}`, 'hint'), el('p', operation.description, 'hint'));
     const link = el('a', '官方文档'); link.href = operation.documentation; link.target = '_blank'; link.rel = 'noopener noreferrer'; detail.append(link);
-    row.append(title, el('span', operation.method, 'method'), detail); $('platform-operations').append(row);
+    row.append(title, el('span', operation.method, 'method')); if (operation.explanation) row.append(el('p', `${operation.category_label} · ${operation.explanation}`, 'operation-explanation')); row.append(detail); $('platform-operations').append(row);
   }
   setupPermissionFilters('platform');
 }
@@ -450,7 +468,7 @@ async function loadPlatforms() {
     platforms = result.platforms || [];
     $('platform-select').replaceChildren();
     for (const platform of platforms) { const option = el('option', platform.name); option.value = platform.id; $('platform-select').append(option); }
-    renderPlatform(); renderPlatformCards();
+    renderPlatform(); renderPlatformCards(); renderList();
     if (mode === 'platform') displayMode(mode);
   } catch {
     $('platform-load-error').hidden = false;
@@ -468,20 +486,25 @@ try {
 function setupPermissionFilters(prefix) {
   const container = $(`${prefix}-operations`);
   $(`${prefix}-permission-search`).value = ''; $(`${prefix}-permission-method`).value = '';
+  const categorySelect = $(`${prefix}-permission-category`); categorySelect.value = '';
+  fillCategories(categorySelect, [...container.children].map((row) => ({ category: row.dataset.category, category_label: row.dataset.categoryLabel })));
+  const all = $(`${prefix}-permission-all`);
   const update = () => {
     const term = $(`${prefix}-permission-search`).value.trim().toLowerCase();
     const method = $(`${prefix}-permission-method`).value;
-    let shown = 0, enabled = 0;
+    let shown = 0, enabled = 0, selectedShown = 0;
     for (const row of container.children) {
-      row.hidden = !!((method && row.dataset.method !== method) || (term && !row.dataset.search.includes(term)));
-      if (!row.hidden) shown++;
+      row.hidden = !!((categorySelect.value && row.dataset.category !== categorySelect.value) || (method && row.dataset.method !== method) || (term && !row.dataset.search.includes(term)));
+      if (!row.hidden) { shown++; if (row.querySelector('input').checked) selectedShown++; }
       if (row.querySelector('input').checked) enabled++;
     }
-    $(`${prefix}-permission-count`).textContent = `显示 ${shown} / ${container.children.length} 个操作 · 已选 ${enabled} 个`;
+    all.disabled = !shown; all.checked = shown > 0 && selectedShown === shown; all.indeterminate = selectedShown > 0 && selectedShown < shown;
+    $(`${prefix}-permission-count`).textContent = `当前筛选已选 ${selectedShown} / ${shown} · 全部 ${container.children.length} 个操作，已选 ${enabled} 个`;
   };
   $(`${prefix}-permission-search`).oninput = update;
   $(`${prefix}-permission-method`).onchange = update;
-  container.onchange = update;
+  container.onchange = update; categorySelect.onchange = update;
+  all.onchange = () => { for (const row of container.children) if (!row.hidden) row.querySelector('input').checked = all.checked; if (prefix === 'connection') connectionDirty = true; else dirty = true; update(); };
   for (const [action, checked] of [['enable', true], ['disable', false]]) {
     $(`${prefix}-permission-${action}`).onclick = () => {
       for (const row of container.children) if (!row.hidden) row.querySelector('input').checked = checked;

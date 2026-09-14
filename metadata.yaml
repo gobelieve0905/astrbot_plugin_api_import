@@ -1,7 +1,7 @@
 name: astrbot_plugin_api_import
 display_name: API 工具接入
 desc: 通过通用接口定义，将 HTTP API 注册为 AstrBot 工具，支持 平台快速接入（AppLovin Report、Meta 广告管理）、多账户命名与调用权限管理、表单与 cURL 接入和结果提取。
-version: 0.1.2
+version: 0.1.3
 author: gobelieve
 repo: https://github.com/gobelieve0905/astrbot_plugin_api_import
 astrbot_version: '>=4.28.0,<5'

@@ -197,6 +197,11 @@ def run():
         page.locator("#add").click()
         assert page.locator("#panel-platform").is_visible()
         assert page.locator("#tab-auto").count() == 0
+        boxes = page.locator("#platform-cards .integration-card").evaluate_all(
+            "nodes => nodes.map(n => ({height:n.getBoundingClientRect().height, bottom:n.querySelector('.integration-actions').getBoundingClientRect().bottom}))"
+        )
+        assert len(boxes) == 2 and abs(boxes[0]["height"] - boxes[1]["height"]) < 1
+        assert abs(boxes[0]["bottom"] - boxes[1]["bottom"]) < 1
         page.screenshot(path=str(output / "platform-market.png"), animations="disabled")
         page.locator("#platform-cards .integration-card").filter(
             has_text="AppLovin Report"
@@ -335,6 +340,19 @@ def run():
         ).get_by_role("button", name="添加账户").click()
         assert page.locator("#platform-operations .operation-row").count() == 714
         assert page.locator("#platform-operations input:checked").count() == 0
+        page.locator("#platform-permission-category").select_option("advertising")
+        visible_count = page.locator("#platform-operations .operation-row:visible").count()
+        assert 0 < visible_count < 714
+        page.locator("#platform-permission-all").check()
+        assert page.locator("#platform-operations input:checked").count() == visible_count
+        page.locator("#platform-operations .operation-row:visible input").first.uncheck()
+        assert page.locator("#platform-permission-all").evaluate("n => n.indeterminate")
+        page.locator("#platform-permission-disable").click()
+        assert page.locator("#platform-operations input:checked").count() == 0
+        page.locator("#platform-permission-search").fill("nonexistent-route-xyz")
+        assert page.locator("#platform-permission-all").is_disabled()
+        page.locator("#platform-permission-search").fill("")
+        page.locator("#platform-permission-category").select_option("")
         page.locator("#platform-name").fill("Meta 国内账户")
         page.locator("#platform-call-name").fill("Meta_Main")
         page.locator("#platform-token").fill("synthetic-meta-browser")
@@ -361,7 +379,10 @@ def run():
         card.get_by_role("button", name="进入账户").click()
         page.locator("#operation-search").fill("广告系列")
         page.screenshot(path=str(output / "meta-operations.png"), animations="disabled")
+        page.locator("#operation-category").select_option("advertising")
+        assert page.locator("#account-operation-list .operation-explanation").count() > 0
         page.locator("#account-settings").click()
+        page.locator("#connection-permission-category").select_option("advertising")
         page.locator("#connection-permission-search").fill("/campaigns")
         page.locator("#connection-permission-method").select_option("POST")
         page.locator("#connection-permission-disable").click()

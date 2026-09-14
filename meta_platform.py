@@ -9,6 +9,7 @@ from functools import lru_cache
 from pathlib import Path
 
 from .definitions import DefinitionError
+from .meta_descriptions import describe
 
 PLATFORM = "meta_marketing"
 DOCUMENTATION = "https://developers.facebook.com/docs/marketing-api/"
@@ -74,7 +75,10 @@ def platform_entry():
         "operations": [
             {
                 "id": op["id"],
-                "title": title(op),
+                "title": VERBS[op["method"]]
+                + " · "
+                + TITLES.get(op["path"].strip("/") or "node", describe(op)["label"]),
+                **describe(op),
                 "method": op["method"],
                 "path": "/{node_id}" + op["path"],
                 "description": "对象："
