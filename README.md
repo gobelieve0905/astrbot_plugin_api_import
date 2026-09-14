@@ -173,3 +173,9 @@ Meta 目录提供 11 个插件业务分类、用途说明、适用 SDK 对象与
 标准 AppLovin 广告报表兼容 `filter_package_name` 作为 `filter_campaign_package_name` 的别名；单个筛选字符串会转为单元素数组，多值请传 JSON 数组。新旧名称不能同时传入，不会猜测或更改包名。此兼容不适用于 Meta 或手动定义的其他接口。
 
 Meta 账户列表和 Insights 返回 `result_id` 时，可用同一工具传原 `node_id` 与 `result_page={"id":"结果 ID","offset":0,"limit":20}` 读取本地完整行，不再传 `fields` 或 `params`。按 `next_offset` 继续，直到为空，再处理原 `page.has_more` 指示的远端分页。可用 `columns` 选择已返回的列。结果 ID 在插件重载、工具更新或缓存淘汰后失效；权限关闭后不能继续读取。该功能不自动统计所有账户。
+
+## 独立代码执行客户端（2026-09-14）
+
+插件提供同 UID 的本地 Unix JSON RPC 任务网关：`data/plugin_data/astrbot_plugin_api_import/task-gateway.sock`。客户端不读取 Token 或配置；申请指定工具与固定参数范围的短期任务凭证后，每次分页、重试及关联请求仍由本插件检查当前权限并发起 HTTP 请求。Meta 仍使用固定代理，失败不直连。后台修改操作会撤销旧任务授权。凭证每连接独立，最多 600 秒/200 次调用，不能修改权限。
+
+网关返回完整单页结果、移除宿主文件路径及敏感字段；不自动分页、重试或保存结果文件。代码客户端可据此自主分析。原有直接调用工具功能不变，API 插件无需安装代码执行插件即可使用。具体协议见 [任务接口](https://github.com/gobelieve0905/astrbot_plugin_code_running/blob/develop/docs/protocol.md)。Unix socket 与 AstrBot 进程属于可信控制面，其他宿主执行工具必须停用或纳入相同隔离边界。

@@ -190,7 +190,9 @@ class Executor:
             **result,
         }
 
-    async def execute(self, definition: Definition, arguments: dict, guard=lambda: True) -> dict:
+    async def execute(
+        self, definition: Definition, arguments: dict, guard=lambda: True, *, full_result=False
+    ) -> dict:
         started = time.monotonic()
         result = {"ok": False, "tool": definition.tool_name}
         try:
@@ -360,6 +362,8 @@ class Executor:
             if is_meta and definition.connection.get("operation") == "get_adaccounts":
                 # Account discovery is compact and must not silently hide later accounts.
                 limit = max(limit, 64000)
+            if full_result:
+                limit = len(serialized)
             result.update(ok=True, bytes=size, truncated=len(serialized) > limit)
             if is_meta and isinstance(data, dict) and isinstance(data.get("data"), list):
                 paging = data.get("paging", {})
@@ -391,7 +395,7 @@ class Executor:
                 result["preview"] = serialized[:limit]
             else:
                 result["data"] = selected
-            if definition.response.get("save", False):
+            if definition.response.get("save", False) and not full_result:
                 self.data_dir.mkdir(parents=True, exist_ok=True)
                 result_id = uuid.uuid4().hex
                 filename = f"{definition.name}-{result_id}.json"

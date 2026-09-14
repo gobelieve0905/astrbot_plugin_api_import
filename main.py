@@ -17,6 +17,7 @@ from .importing import import_curl
 from .platforms import platform_catalog
 from .proxy_nodes import FixedProxyNodes
 from .result_pages import tool_parameters
+from .task_gateway import TaskGateway
 
 
 class ImportedTool(FunctionTool):
@@ -42,13 +43,16 @@ class ImportedTool(FunctionTool):
         for task in tuple(self.pending_calls):
             task.cancel()
 
-    async def call(self, context, **kwargs):
+    async def execute(self, kwargs, *, full_result=False, extra_guard=lambda: True):
         if not self.available or not self.active:
             result = {"ok": False, "error": "该工具已更新、删除或停用，请重新选择工具"}
         else:
             task = asyncio.create_task(
                 self.executor.execute(
-                    self.definition, kwargs, guard=lambda: self.available and self.active
+                    self.definition,
+                    kwargs,
+                    guard=lambda: self.available and self.active and extra_guard(),
+                    full_result=full_result,
                 )
             )
             self.pending_calls.add(task)
@@ -63,6 +67,10 @@ class ImportedTool(FunctionTool):
                 }
             finally:
                 self.pending_calls.discard(task)
+        return result
+
+    async def call(self, context, **kwargs):
+        result = await self.execute(kwargs)
         return CallToolResult(
             content=[TextContent(type="text", text=json.dumps(result, ensure_ascii=False))],
             isError=not result["ok"],
@@ -81,6 +89,7 @@ class ApiImportPlugin(Star):
             StarTools.get_data_dir("astrbot_plugin_api_import") / "meta_proxy_nodes.json", config
         )
         self.closed = False
+        self.task_gateway = TaskGateway(self)
         self.catalog = Catalog(config, self._apply_saved)
         self.edit_lock = asyncio.Lock()
         self.web_handlers = []
@@ -164,6 +173,9 @@ class ApiImportPlugin(Star):
         except Exception:
             await self.terminate()
             raise
+        await self.task_gateway.start(
+            StarTools.get_data_dir("astrbot_plugin_api_import") / "task-gateway.sock"
+        )
         logger.info(f"API 工具接入已加载 {len(self.tools)} 个工具")
 
     async def page_meta_proxy(self):
@@ -321,6 +333,7 @@ class ApiImportPlugin(Star):
 
     async def terminate(self):
         self.closed = True
+        await self.task_gateway.close()
         for tool in self.tools:
             tool.invalidate()
         self.context.registered_web_apis[:] = [
