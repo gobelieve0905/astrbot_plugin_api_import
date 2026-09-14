@@ -40,12 +40,17 @@ def redact(value, request):
             hidden.add(credential_part)
     hidden |= {quote(v, safe="") for v in hidden} | {quote_plus(v) for v in hidden}
 
+    response_sensitive = re.compile(
+        r"^(?:key|token|(?:access|refresh)[_-]?token|api[_-]?key|secret|client[_-]?secret|"
+        r"password|authorization|cookie|credentials?)$",
+        re.I,
+    )
+
     def clean(item):
         if isinstance(item, dict):
             return {
-                key: "[REDACTED]" if sensitive.search(key) else clean(child)
+                key: "[REDACTED]" if response_sensitive.fullmatch(key) else clean(child)
                 for key, child in item.items()
-                if key not in {"file", "file_scope"}
             }
         if isinstance(item, list):
             return [clean(v) for v in item]
@@ -54,7 +59,11 @@ def redact(value, request):
                 item = item.replace(secret, "[REDACTED]")
         return item
 
-    return clean(value)
+    result = clean(value)
+    if isinstance(result, dict):
+        result.pop("file", None)
+        result.pop("file_scope", None)
+    return result
 
 
 class TaskGateway:
@@ -109,6 +118,8 @@ class TaskGateway:
                 while line := await asyncio.wait_for(reader.readline(), 605):
                     try:
                         payload = json.loads(line)
+                        if not isinstance(payload, dict):
+                            raise ValueError("网关请求必须是对象")
                         action = payload.get("action")
                         if self.plugin.closed:
                             raise ValueError("API 插件已关闭")
@@ -212,4 +223,7 @@ class TaskGateway:
         finally:
             self.clients.discard(current)
             writer.close()
-            await writer.wait_closed()
+            try:
+                await writer.wait_closed()
+            except ConnectionError:
+                pass

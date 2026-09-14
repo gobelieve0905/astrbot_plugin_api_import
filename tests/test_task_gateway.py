@@ -168,3 +168,29 @@ class GatewayTests(unittest.IsolatedAsyncioTestCase):
             redact({"data": "private"}, {"url": "https://example.test?token=private"}),
             {"data": "[REDACTED]"},
         )
+
+
+class ResultDataTests(unittest.TestCase):
+    def test_business_fields_survive_redaction(self):
+        result = redact(
+            {
+                "file": "/private/result",
+                "data": {
+                    "keywords": ["apple"],
+                    "monkey": 3,
+                    "file": "report.csv",
+                    "access_token": "private",
+                },
+            },
+            {},
+        )
+        self.assertNotIn("file", result)
+        self.assertEqual(
+            result["data"],
+            {
+                "keywords": ["apple"],
+                "monkey": 3,
+                "file": "report.csv",
+                "access_token": "[REDACTED]",
+            },
+        )
