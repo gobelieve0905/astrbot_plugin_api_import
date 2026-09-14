@@ -10,5 +10,11 @@
     "description": "Meta 固定代理节点 ID",
     "hint": "请在 API 管理页面的 Meta 固定代理设置中选择；留空停止 Meta 请求，不沿用宿主自动代理。",
     "default": ""
+  },
+  "task_max_calls": {
+    "type": "int",
+    "description": "代码任务单次 API 调用上限",
+    "hint": "管理员设置，范围 1–10000；默认 200。仅限制调用数量，不开放任何 API 操作。修改后重载插件生效。",
+    "default": 200
   }
 }

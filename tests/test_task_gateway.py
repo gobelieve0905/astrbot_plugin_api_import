@@ -82,6 +82,34 @@ class GatewayTests(unittest.IsolatedAsyncioTestCase):
             )["ok"]
         )
 
+    async def test_admin_budget_is_enforced_and_errors_distinct(self):
+        denied = await self.issue(quota=201)
+        self.assertEqual(denied["error_code"], "QUOTA_POLICY")
+        self.plugin.config = {"task_max_calls": 300}
+        grant = await self.issue(quota=250)
+        self.assertEqual(grant["quota"], 250)
+        self.tool.active = False
+        denied = await self.rpc(
+            action="call",
+            credential=grant["credential"],
+            tool="api_read",
+            arguments={"node_id": "act_1"},
+        )
+        self.assertEqual(denied["error_code"], "PERMISSION_REVOKED")
+
+    async def test_quota_exhaustion_has_stable_error(self):
+        grant = await self.issue(quota=1)
+        kwargs = dict(
+            action="call",
+            credential=grant["credential"],
+            tool="api_read",
+            arguments={"node_id": "act_1"},
+        )
+        self.assertTrue((await self.rpc(**kwargs))["ok"])
+        denied = await self.rpc(**kwargs)
+        self.assertEqual(denied["error_code"], "QUOTA_EXHAUSTED")
+        self.assertEqual(denied["remaining"], 0)
+
     async def test_revoke_current_permissions(self):
         grant = await self.issue()
         self.tool.active = False

@@ -179,3 +179,6 @@ Meta 账户列表和 Insights 返回 `result_id` 时，可用同一工具传原 
 插件提供同 UID 的本地 Unix JSON RPC 任务网关：`data/plugin_data/astrbot_plugin_api_import/task-gateway.sock`。客户端不读取 Token 或配置；申请指定工具与固定参数范围的短期任务凭证后，每次分页、重试及关联请求仍由本插件检查当前权限并发起 HTTP 请求。Meta 仍使用固定代理，失败不直连。后台修改操作会撤销旧任务授权。凭证每连接独立，最多 600 秒/200 次调用，不能修改权限。
 
 网关返回完整单页结果、移除宿主文件路径及敏感字段；不自动分页、重试或保存结果文件。代码客户端可据此自主分析。原有直接调用工具功能不变，API 插件无需安装代码执行插件即可使用。具体协议见 [任务接口](https://github.com/gobelieve0905/astrbot_plugin_code_running/blob/develop/docs/protocol.md)。Unix socket 与 AstrBot 进程属于可信控制面，其他宿主执行工具必须停用或纳入相同隔离边界。
+
+
+后台 `task_max_calls` 设置代码任务网关单任务调用上限（1–10000，默认 200，重载生效）。代码执行端另有管理员上限；两者共同约束，模型无法申请超过上限的额度。额度只控制次数，不开放任何操作权限，也不改变固定 Meta 代理。额度耗尽返回 `QUOTA_EXHAUSTED`，与 `TASK_EXPIRED`、`PERMISSION_REVOKED` 分开。

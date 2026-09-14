@@ -14,6 +14,12 @@ from urllib.parse import parse_qsl, quote, quote_plus, urlsplit
 LIMIT = 12 * 1024 * 1024
 
 
+class GatewayError(ValueError):
+    def __init__(self, code, message):
+        super().__init__(message)
+        self.code = code
+
+
 def redact(value, request):
     hidden = set()
     sensitive = re.compile(r"key|token|secret|password|authorization|cookie|credential", re.I)
@@ -135,8 +141,17 @@ class TaskGateway:
                             ttl, quota = payload.get("ttl", 120), payload.get("quota", 50)
                             if type(ttl) is not int or not 1 <= ttl <= 600:
                                 raise ValueError("任务有效期必须为 1–600 秒")
-                            if type(quota) is not int or not 1 <= quota <= 200:
-                                raise ValueError("任务额度必须为 1–200 次")
+                            ceiling = (
+                                self.plugin.config.get("task_max_calls", 200)
+                                if hasattr(self.plugin, "config")
+                                else 200
+                            )
+                            if type(ceiling) is not int or not 1 <= ceiling <= 10000:
+                                raise GatewayError("POLICY_INVALID", "管理员任务额度配置无效")
+                            if type(quota) is not int or not 1 <= quota <= ceiling:
+                                raise GatewayError(
+                                    "QUOTA_POLICY", f"请求额度超过管理员上限 {ceiling}"
+                                )
                             scopes = requested
                             # Bind to current tool objects; edits revoke existing grants.
                             granted = {name: self.live(name) for name in scopes}
@@ -162,15 +177,21 @@ class TaskGateway:
                                 str(payload.get("credential", "")), credential
                             ):
                                 raise ValueError("任务凭证无效")
-                            if time.monotonic() >= deadline or remaining <= 0:
-                                raise ValueError("任务已过期或调用额度耗尽")
+                            if time.monotonic() >= deadline:
+                                raise GatewayError("TASK_EXPIRED", "任务已过期")
+                            if remaining <= 0:
+                                raise GatewayError(
+                                    "QUOTA_EXHAUSTED", "调用额度耗尽，请保存进度后创建新的授权任务"
+                                )
                             remaining -= 1  # Failed attempts also consume quota; no implicit retry.
                             name, arguments = payload.get("tool"), payload.get("arguments")
                             if name not in scopes or not isinstance(arguments, dict):
                                 raise ValueError("操作不在任务范围或参数无效")
                             tool = granted[name]
                             if self.live(name) is not tool:
-                                raise ValueError("操作已停用或更新，请创建新任务")
+                                raise GatewayError(
+                                    "PERMISSION_REVOKED", "操作已停用或更新，请创建新任务"
+                                )
                             if any(
                                 key not in arguments or arguments[key] != value
                                 for key, value in scopes[name].items()
@@ -211,6 +232,8 @@ class TaskGateway:
                     except (ValueError, TypeError, KeyError) as exc:
                         result = {
                             "ok": False,
+                            "error_code": getattr(exc, "code", "GATEWAY_REJECTED"),
+                            "remaining": remaining,
                             "error": str(exc)[:300]
                             if isinstance(exc, ValueError)
                             and not isinstance(exc, json.JSONDecodeError)
