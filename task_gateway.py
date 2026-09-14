@@ -84,6 +84,69 @@ class TaskGateway:
             (t for t in self.plugin.tools if t.name == name and t.active and t.available), None
         )
 
+    def inspect(self, payload):
+        """Metadata/schema checks only. Never grant credentials or execute requests."""
+        name = payload.get("tool")
+        if name is None:
+            query = payload.get("query", "")
+            offset = payload.get("offset", 0)
+            if (
+                not isinstance(query, str)
+                or len(query) > 200
+                or type(offset) is not int
+                or offset < 0
+            ):
+                raise ValueError("搜索参数无效")
+            matches = [
+                t
+                for t in self.plugin.tools
+                if self.live(t.name) is t
+                and query.casefold() in (t.name + " " + t.description).casefold()
+            ]
+            return {
+                "ok": True,
+                "total": len(matches),
+                "next_offset": offset + 20 if offset + 20 < len(matches) else None,
+                "items": [
+                    redact(
+                        {"name": t.name, "description": t.description[:240]}, t.definition.request
+                    )
+                    for t in matches[offset : offset + 20]
+                ],
+            }
+        if not isinstance(name, str) or not (tool := self.live(name)):
+            raise ValueError("工具不存在或未启用；请搜索当前可用工具，不要创建名称别名")
+        result = {
+            "ok": True,
+            "name": tool.name,
+            "description": tool.description,
+            "parameters": tool.parameters,
+            "response_contract": "成功响应 data 为供应商原始数据；page 为可用时的分页元数据。失败检查 ok/error。保存日志每行 response 才是响应。",
+            "scope_contract": "constraints 是顶层参数等值约束；空对象不固定参数，但不开放后台关闭的操作。",
+        }
+        if "arguments" in payload:
+            from jsonschema import Draft202012Validator
+
+            arguments, constraints = payload["arguments"], payload.get("constraints", {})
+            if not isinstance(arguments, dict) or not isinstance(constraints, dict):
+                raise ValueError("参数与约束必须为对象")
+            errors = [
+                {"path": list(e.absolute_path), "rule": e.validator}
+                for e in Draft202012Validator(tool.parameters).iter_errors(arguments)
+            ]
+            errors.extend(
+                {"path": [key], "rule": "fixed_constraint"}
+                for key, value in constraints.items()
+                if key not in arguments or arguments[key] != value
+            )
+            result.update(
+                valid=not errors,
+                errors=errors[:20],
+                checked="schema_and_fixed_constraints_only",
+                notice="未发送请求、未授予权限；平台字段规则、凭据、资源权限及当前后台状态仍在正式执行时校验。",
+            )
+        return redact(result, tool.definition.request)
+
     async def start(self, path):
         self.path = Path(path)
         self.path.parent.mkdir(parents=True, exist_ok=True)
@@ -129,7 +192,9 @@ class TaskGateway:
                         action = payload.get("action")
                         if self.plugin.closed:
                             raise ValueError("API 插件已关闭")
-                        if action == "issue" and credential is None:
+                        if action == "inspect":
+                            result = self.inspect(payload)
+                        elif action == "issue" and credential is None:
                             requested = payload.get("scopes", {})
                             if not isinstance(requested, dict) or not 1 <= len(requested) <= 100:
                                 raise ValueError("任务须指定 1–100 个操作及参数约束")

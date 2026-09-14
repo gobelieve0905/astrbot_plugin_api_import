@@ -72,11 +72,11 @@ def tool_guidance(operation_id):
     if len(objects) > 12:
         scope += f" 等 {len(objects)} 类对象，完整范围请查看后台操作说明"
     if operation_id == "get_adaccounts":
-        scope += "。查询当前用户可访问的广告账户使用 node_id=me；路径为 /me/adaccounts（不含下划线）。必须遍历完整账户列表及分页；账户名称不能证明项目归属，不能仅凭名称关键词排除其他账户，也不能找到一个同名账户就停止。使用后台已开启的广告/广告组等查询核对应用标识、promoted_object 或其他明确项目映射；无法核实时列出未核实范围，不得称为全量结果"
+        scope += "。查询当前用户可访问的广告账户使用 node_id=me；路径为 /me/adaccounts（不含下划线）。返回当前查询的一页账户数据。"
     elif operation_id == "get_ad_accounts":
         scope += "。此接口不能用于发现当前用户的广告账户，不接受 node_id=me；用户账户列表需使用另一个已授权的 get_adaccounts 操作"
     if operation_id == "get_insights":
-        scope += "。这就是 Meta Insights 报表接口。用户已给出广告系列归属规则时，可对各账户直接查询 level=ad 的报表并用 campaign.name 等已确认字段筛选，无须先逐个查询广告系列、广告组、广告再取指标。先列全账户，维护成功、失败、未查询账户清单；不能只扫前一批就结束。大报表如需异步任务，只有后台已开启对应 POST 和报告查询操作才可使用，不能自行开启。只返回当前 node_id 的单页报表，不代表全部相关账户。跨账户汇总先核实项目与账户/广告的关联，遍历相关账户和分页后再聚合排序；未核实账户、截断或未读分页必须说明。返回文件仅是本次响应，不等于已经读取、分析完整数据。跨账户、按素材名称聚合后的 Top N，必须取全范围再聚合排序，不能用单账户 sort 加 limit 代替。不要猜测 purchase_descending 等排序字段；sort 无效的 #100 错误属于参数错误，不能解释为无权限。消耗排序 spend_descending 不等于 Purchase 排序；Purchase 统计应核对 actions 中实际 action_type，避免重复计算不同归因口径。"
+        scope += "。Meta Insights 报表接口，返回当前 node_id 的单页报表。fields、params 按声明填写；异步报表须另有对应已授权操作。排序或字段错误属于参数错误，不等于权限不足。"
     return (
         scope
         + "。请检查 page 信息；有 result_id 时优先保留 node_id、仅传 result_page 分段读取本地完整结果（不重复请求 Meta），读到 next_offset=null 后才处理远端下一页。没有 result_id 的截断结果应缩小 limit 重取当前页，不能直接用下一页游标跳过未读数据。不要凭接口名称相似而替换对象类型或绕过后台权限。"

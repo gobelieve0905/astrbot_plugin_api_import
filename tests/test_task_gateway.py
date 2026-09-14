@@ -52,6 +52,37 @@ class GatewayTests(unittest.IsolatedAsyncioTestCase):
     async def issue(self, **extra):
         return await self.rpc(action="issue", scopes={"api_read": {"node_id": "act_1"}}, **extra)
 
+    async def test_discovery_and_preflight_never_execute_or_grant(self):
+        from unittest.mock import AsyncMock
+
+        self.tool.execute = AsyncMock(side_effect=AssertionError("must not execute"))
+        self.tool.parameters = {
+            "type": "object",
+            "properties": {"value": {"type": "integer"}},
+            "required": ["value"],
+            "additionalProperties": False,
+        }
+        found = await self.rpc(action="inspect", query="read")
+        self.assertEqual(found["total"], 1)
+        self.assertNotIn("credential", found)
+        detail = await self.rpc(
+            action="inspect", tool="api_read", arguments={"value": 2}, constraints={"value": 1}
+        )
+        self.assertFalse(detail["valid"])
+        self.assertEqual(detail["errors"][0]["rule"], "fixed_constraint")
+        bad = await self.rpc(action="inspect", tool="api_read", arguments={"value": "bad"})
+        self.assertFalse(bad["valid"])
+        good = await self.rpc(action="inspect", tool="api_read", arguments={"value": 1})
+        self.assertTrue(good["valid"])
+        self.assertNotIn("credential", good)
+        self.assertFalse(
+            (await self.rpc(action="call", tool="api_read", arguments={"value": 1}))["ok"]
+        )
+        self.tool.active = False
+        self.assertFalse((await self.rpc(action="inspect", tool="api_read"))["ok"])
+        self.assertEqual((await self.rpc(action="inspect"))["total"], 0)
+        self.tool.execute.assert_not_called()
+
     async def test_scope_quota_and_redaction(self):
         grant = await self.issue(quota=2)
         first = await self.rpc(

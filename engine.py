@@ -389,7 +389,7 @@ class Executor:
                     )
                 else:
                     result["page"]["next_step"] = (
-                        "本页完整且没有下一页；仍需核对其他相关账户与项目关联，不能以账户名称排除其他账户。"
+                        "本页完整且没有下一页；此状态仅描述当前请求，不代表用户整个任务已完成。"
                     )
             if len(serialized) > limit:
                 result["preview"] = serialized[:limit]

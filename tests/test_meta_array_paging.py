@@ -68,7 +68,8 @@ class MetaArrayPaging(unittest.IsolatedAsyncioTestCase):
         result = await self.call("get_adaccounts", {"node_id": "me"})
         self.assertFalse(result["truncated"])
         self.assertEqual(len(result["data"]["data"]), 111)
-        self.assertIn("账户名称不能证明项目归属", Meta.tool_guidance("get_adaccounts"))
+        self.assertIn("/me/adaccounts", Meta.tool_guidance("get_adaccounts"))
+        self.assertNotIn("项目归属", Meta.tool_guidance("get_adaccounts"))
         self.assertEqual(
             len(self.sent), 1
         )  # Never auto query another account or grant a permission.
