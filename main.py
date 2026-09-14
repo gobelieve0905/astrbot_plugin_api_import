@@ -86,7 +86,7 @@ class ApiImportPlugin(Star):
         for route, handler, methods in (
             ("catalog", self.page_catalog, ["GET"]),
             ("meta-proxy", self.page_meta_proxy, ["GET"]),
-            ("meta-proxy", self.page_save_meta_proxy, ["POST"]),
+            ("save-meta-proxy", self.page_save_meta_proxy, ["POST"]),
             ("save", self.page_save, ["POST"]),
             ("delete", self.page_delete, ["POST"]),
             ("import-curl", self.page_import_curl, ["POST"]),

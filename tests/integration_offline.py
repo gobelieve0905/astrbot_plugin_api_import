@@ -86,6 +86,7 @@ async def main():
         config_path=config_path, default_config={"tools_json": json.dumps([definition])}
     )
     plugin.catalog.config = plugin.config
+    plugin.proxy_nodes.config = plugin.config
 
     async def web_call(handler, payload):
         body = json.dumps(payload).encode()

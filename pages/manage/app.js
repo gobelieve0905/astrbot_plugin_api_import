@@ -106,7 +106,7 @@ $('meta-proxy-save').onclick = async () => {
   if (proxyState.selected && proxyState.selected !== nodeId && !await confirmAction('切换 Meta 固定节点', '此操作影响全部 Meta 接入并改变网络出口。确认切换到所选节点？', '确认切换')) return;
   $('meta-proxy-save').disabled = true;
   try {
-    proxyState = await bridge.apiPost('meta-proxy', { revision: proxyState.revision, node_id: nodeId });
+    proxyState = await bridge.apiPost('save-meta-proxy', { revision: proxyState.revision, node_id: nodeId });
     await openMetaProxy(); notice('Meta 固定节点已保存。节点故障时停止请求，不自动切换。');
   } catch (error) { $('meta-proxy-error').textContent = error.message; $('meta-proxy-error').hidden = false; }
   finally { $('meta-proxy-save').disabled = false; }
