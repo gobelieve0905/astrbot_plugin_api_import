@@ -15,6 +15,7 @@ from .definitions import DefinitionError, parse_definitions
 from .engine import Executor
 from .importing import import_curl
 from .platforms import platform_catalog
+from .proxy_diagnostics import ProxyDiagnostics
 from .proxy_nodes import FixedProxyNodes
 from .result_pages import tool_parameters
 from .task_gateway import TaskGateway
@@ -88,6 +89,9 @@ class ApiImportPlugin(Star):
         self.proxy_nodes = FixedProxyNodes(
             StarTools.get_data_dir("astrbot_plugin_api_import") / "meta_proxy_nodes.json", config
         )
+        self.proxy_diagnostics = ProxyDiagnostics(self.proxy_nodes)
+        self.proxy_refresh_task = None
+        self.proxy_refresh_status = {"running": False}
         self.closed = False
         self.task_gateway = TaskGateway(self)
         self.catalog = Catalog(config, self._apply_saved)
@@ -96,6 +100,8 @@ class ApiImportPlugin(Star):
         for route, handler, methods in (
             ("catalog", self.page_catalog, ["GET"]),
             ("meta-proxy", self.page_meta_proxy, ["GET"]),
+            ("probe-meta-proxy", self.page_probe_meta_proxy, ["POST"]),
+            ("refresh-meta-proxy", self.page_refresh_meta_proxy, ["POST"]),
             ("save-meta-proxy", self.page_save_meta_proxy, ["POST"]),
             ("save", self.page_save, ["POST"]),
             ("delete", self.page_delete, ["POST"]),
@@ -180,13 +186,56 @@ class ApiImportPlugin(Star):
 
     async def page_meta_proxy(self):
         try:
-            return json_response(self.proxy_nodes.snapshot())
+            state = self.proxy_nodes.snapshot()
+            state["results"] = list(self.proxy_diagnostics.results.values())
+            state["refresh"] = self.proxy_refresh_status
+            return json_response(state)
         except (DefinitionError, OSError):
             return error_response("固定代理节点目录不可用，请联系管理员", status_code=503)
+
+    async def page_probe_meta_proxy(self):
+        try:
+            if self.closed or self.proxy_refresh_status["running"]:
+                raise DefinitionError("插件正在卸载或节点正在刷新，请稍后重试")
+            payload = await request.json()
+            if not isinstance(payload, dict):
+                raise DefinitionError("检测参数无效")
+            return json_response(
+                await self.proxy_diagnostics.probe(
+                    payload.get("node_id"), payload.get("kind"), payload.get("revision")
+                )
+            )
+        except DefinitionError as exc:
+            return error_response(str(exc))
+        except Exception:
+            return error_response("代理检测失败，请刷新后重试", status_code=503)
+
+    async def page_refresh_meta_proxy(self):
+        if self.closed or self.proxy_refresh_status["running"] or self.proxy_diagnostics.running:
+            return error_response("已有刷新或检测在进行，请稍后重试")
+        self.proxy_refresh_status = {"running": True}
+        self.proxy_refresh_task = asyncio.create_task(self._refresh_proxy_nodes())
+        return json_response(self.proxy_refresh_status)
+
+    async def _refresh_proxy_nodes(self):
+        try:
+            async with self.edit_lock:
+                await self.proxy_diagnostics.refresh()
+            self.proxy_refresh_status = {"running": False, "ok": True, "message": "订阅节点已刷新"}
+        except DefinitionError as exc:
+            self.proxy_refresh_status = {"running": False, "ok": False, "message": str(exc)}
+        except Exception:
+            self.proxy_refresh_status = {
+                "running": False,
+                "ok": False,
+                "message": "刷新失败，请重新读取目录确认状态",
+            }
 
     async def page_save_meta_proxy(self):
         try:
             payload = await request.json()
+            if self.proxy_refresh_status["running"]:
+                raise DefinitionError("订阅正在刷新，请完成后再选择节点")
             async with self.edit_lock:
                 if self.closed:
                     raise DefinitionError("插件已卸载，请刷新页面")
@@ -333,6 +382,9 @@ class ApiImportPlugin(Star):
 
     async def terminate(self):
         self.closed = True
+        if self.proxy_refresh_task and not self.proxy_refresh_task.done():
+            self.proxy_refresh_task.cancel()
+            await asyncio.gather(self.proxy_refresh_task, return_exceptions=True)
         await self.task_gateway.close()
         for tool in self.tools:
             tool.invalidate()

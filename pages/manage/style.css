@@ -96,3 +96,21 @@ main{max-width:1240px;padding:30px 28px}header{margin-bottom:24px}
 .connection-permission > .operation-details { grid-column: 1 / -1; }
 
 #meta-proxy-dialog{max-width:640px}#meta-proxy-dialog[open]{display:flex;flex-direction:column}.header-actions{display:flex;gap:8px;flex-wrap:wrap}
+
+#meta-proxy-dialog { width: min(1100px, 95vw); max-width: 95vw; }
+.proxy-actions { display: flex; flex-wrap: wrap; gap: 8px; margin: 12px 0; }
+.proxy-table-wrap { overflow-x: auto; }
+.proxy-table-wrap table { width: 100%; min-width: 650px; }
+.proxy-table-wrap td { white-space: normal; padding: 10px; vertical-align: top; }
+.proxy-table-wrap td:last-child { min-width: 190px; }
+.proxy-table-wrap button { margin: 2px; }
+
+.proxy-ok { color: #16715d; }
+.proxy-failed { color: #b13c34; }
+@media (max-width: 600px) {
+ .proxy-table-wrap table { min-width: 0; }
+ .proxy-table-wrap thead { display: none; }
+ .proxy-table-wrap tr { display: block; border: 1px solid #dce3eb; border-radius: 10px; margin: 10px 0; padding: 8px; }
+ .proxy-table-wrap td { display: block; min-width: 0 !important; padding: 5px; }
+ .proxy-table-wrap td::before { content: attr(data-label); display: block; font-weight: 600; color: #607189; margin-bottom: 4px; }
+}

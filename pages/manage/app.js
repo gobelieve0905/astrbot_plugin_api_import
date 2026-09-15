@@ -81,7 +81,8 @@ $('confirm-yes').onclick = () => finishConfirm(true);
 $('confirm-no').onclick = () => finishConfirm(false);
 $('confirm-dialog').addEventListener('cancel', (event) => { event.preventDefault(); finishConfirm(false); });
 
-let proxyState = null;
+let proxyState = null, proxyWorking = false;
+const proxyResults = new Map();
 async function openMetaProxy() {
   const dialog = $('meta-proxy-dialog');
   $('meta-proxy-error').hidden = true;
@@ -95,14 +96,88 @@ async function openMetaProxy() {
     $('meta-proxy-select').value = proxyState.ready ? proxyState.selected : '';
     $('meta-proxy-current').textContent = proxyState.ready ? `当前固定节点：${proxyState.nodes.find(n => n.id === proxyState.selected).name}` : '尚未选择可用的固定节点，Meta 请求已暂停。';
     if (!proxyState.nodes.length) throw new Error('服务器尚未配置固定节点目录，请联系管理员。');
-    $('meta-proxy-save').disabled = false;
+    for (const result of proxyState.results || []) proxyResults.set(`${result.node_id}:${result.kind}`, result);
+    renderProxyNodes();
+    $('meta-proxy-save').disabled = proxyWorking;
   } catch (error) { $('meta-proxy-error').textContent = error.message; $('meta-proxy-error').hidden = false; }
 }
+function proxyResultText(id, kind) {
+  const r = proxyResults.get(`${id}:${kind}`);
+  if (!r) return '未检测';
+  return `${r.message} · ${r.elapsed_ms} ms${r.status ? ` · HTTP ${r.status}` : ''} · ${new Date(r.checked_at).toLocaleString()}`;
+}
+function renderProxyNodes() {
+  $('proxy-rows').replaceChildren();
+  for (const n of proxyState?.nodes || []) {
+    const row = el('tr');
+    row.append(el('td', `${n.name}${n.id === proxyState.selected ? '（当前）' : ''}`));
+    row.append(el('td', proxyResultText(n.id, 'latency')), el('td', proxyResultText(n.id, 'meta')));
+    const actions = el('td');
+    for (const [label, callback] of [['测速', () => runProxyTests([n], 'latency')], ['检测 Meta', () => runProxyTests([n], 'meta')], ['选择', () => { $('meta-proxy-select').value = n.id; $('meta-proxy-save').click(); }]]) {
+      const b = el('button', label); b.disabled = proxyWorking; b.onclick = callback; actions.append(b);
+    }
+    row.append(actions);
+    ['节点', '测速', 'Meta 连通性', '操作'].forEach((label, i) => { row.children[i].dataset.label = label; });
+    for (const [index, kind] of [[1, 'latency'], [2, 'meta']]) {
+      const result = proxyResults.get(`${n.id}:${kind}`);
+      if (result) row.children[index].className = result.ok ? 'proxy-ok' : 'proxy-failed';
+    }
+    $('proxy-rows').append(row);
+  }
+}
+function setProxyWorking(value) {
+  proxyWorking = value;
+  for (const id of ['proxy-refresh', 'proxy-reload', 'proxy-test-all', 'proxy-meta-all', 'meta-proxy-save', 'meta-proxy-select']) $(id).disabled = value;
+  renderProxyNodes();
+}
+async function runProxyTests(nodes, kind) {
+  if (proxyWorking || !proxyState) return;
+  setProxyWorking(true); $('meta-proxy-error').hidden = true;
+  const revision = proxyState.revision; let completed = 0;
+  const queue = [...nodes]; let failed = false;
+  try {
+    $('proxy-progress').textContent = `正在检测 0/${nodes.length}，每个节点最多约 12 秒…`;
+    await Promise.all(Array.from({ length: Math.min(3, queue.length) }, async () => {
+      while (queue.length && !failed) {
+        const n = queue.shift();
+        try {
+          const result = await bridge.apiPost('probe-meta-proxy', { node_id: n.id, kind, revision });
+          proxyResults.set(`${n.id}:${kind}`, result);
+          $('proxy-progress').textContent = `已检测 ${++completed}/${nodes.length}`; renderProxyNodes();
+        } catch (e) { failed = true; $('meta-proxy-error').textContent = e.message; $('meta-proxy-error').hidden = false; }
+      }
+    }));
+    $('proxy-progress').textContent = `${failed ? '检测中断' : '检测完成'}：${completed}/${nodes.length}。当前节点未改变。`;
+  } finally { setProxyWorking(false); }
+}
+$('proxy-test-all').onclick = () => runProxyTests(proxyState?.nodes || [], 'latency');
+$('proxy-meta-all').onclick = () => runProxyTests(proxyState?.nodes || [], 'meta');
+$('proxy-reload').onclick = () => { if (!proxyWorking) { proxyResults.clear(); openMetaProxy(); } };
+$('proxy-refresh').onclick = async () => {
+  if (proxyWorking) return;
+  setProxyWorking(true); $('proxy-progress').textContent = '正在刷新订阅，通常需要几十秒；不会自动切换节点…';
+  try {
+    await bridge.apiPost('refresh-meta-proxy', {});
+    let finished = false;
+    for (let i = 0; i < 100; i++) {
+      await new Promise(resolve => setTimeout(resolve, 2000));
+      proxyState = await bridge.apiGet('meta-proxy');
+      if (!proxyState.refresh?.running) {
+        if (!proxyState.refresh?.ok) throw new Error(proxyState.refresh?.message || '刷新状态丢失，请重新读取目录');
+        finished = true; break;
+      }
+    }
+    if (!finished) throw new Error('刷新仍在运行，请稍后重新读取目录确认结果');
+    proxyResults.clear();
+    $('proxy-progress').textContent = '订阅已刷新，请检测节点后手动选择。'; await openMetaProxy();
+  } catch (e) { $('meta-proxy-error').textContent = e.message; $('meta-proxy-error').hidden = false; }
+  finally { setProxyWorking(false); }
+};
 $('meta-proxy-open').onclick = $('connection-proxy-open').onclick = $('platform-proxy-open').onclick = openMetaProxy;
 $('meta-proxy-close').onclick = () => $('meta-proxy-dialog').close();
 $('meta-proxy-save').onclick = async () => {
   const nodeId = $('meta-proxy-select').value;
-  if (!nodeId || !proxyState) return;
+  if (!nodeId || !proxyState || proxyWorking) return;
   if (proxyState.selected && proxyState.selected !== nodeId && !await confirmAction('切换 Meta 固定节点', '此操作影响全部 Meta 接入并改变网络出口。确认切换到所选节点？', '确认切换')) return;
   $('meta-proxy-save').disabled = true;
   try {

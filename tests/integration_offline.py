@@ -266,6 +266,45 @@ async def main():
     )
     assert stale.status_code == 409
     assert plugin.config["meta_proxy_node"] == "fixed_a"
+    # New administrator routes use the real request binding and never call business APIs.
+    from unittest.mock import patch
+
+    diagnostics_module = importlib.import_module(package.__name__ + ".proxy_diagnostics")
+    probe_client = httpx.AsyncClient(transport=httpx.MockTransport(lambda r: httpx.Response(400)))
+    with patch.object(diagnostics_module.httpx, "AsyncClient", return_value=probe_client):
+        probed = await web_call(
+            plugin.page_probe_meta_proxy,
+            {
+                "revision": plugin.proxy_nodes.snapshot()["revision"],
+                "node_id": "fixed_a",
+                "kind": "meta",
+            },
+        )
+    assert probed.status_code == 200 and json.loads(probed.body)["ok"]
+    invalid_probe = await web_call(
+        plugin.page_probe_meta_proxy, {"node_id": "fixed_a", "kind": "http://localhost"}
+    )
+    assert invalid_probe.status_code == 400
+    entered, release = asyncio.Event(), asyncio.Event()
+
+    async def fake_refresh():
+        entered.set()
+        await release.wait()
+        return plugin.proxy_nodes.snapshot()
+
+    with patch.object(plugin.proxy_diagnostics, "refresh", fake_refresh):
+        accepted = await web_call(plugin.page_refresh_meta_proxy, {})
+        assert accepted.status_code == 200
+        await entered.wait()
+        blocked = await web_call(
+            plugin.page_save_meta_proxy,
+            {"revision": plugin.proxy_nodes.snapshot()["revision"], "node_id": "fixed_b"},
+        )
+        assert blocked.status_code == 400
+        release.set()
+        await plugin.proxy_refresh_task
+    assert plugin.proxy_refresh_status["ok"] and not plugin.proxy_refresh_status["running"]
+    assert plugin.config["meta_proxy_node"] == "fixed_a"
     meta_tools = [t for t in plugin.tools if t.name.startswith("Meta_Main_")]
     plugin.executor.fixed_proxy_clients[proxy_url] = httpx.AsyncClient(
         transport=httpx.MockTransport(meta_response)

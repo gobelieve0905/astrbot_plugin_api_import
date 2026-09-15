@@ -17,6 +17,13 @@ ConflictError = importlib.import_module("api_import_test.catalog").ConflictError
 import_curl = importlib.import_module("api_import_test.importing").import_curl
 Platforms = importlib.import_module("api_import_test.platforms")
 config = {"tools_json": "[]"}
+proxy_fixture = {
+    "nodes": [{"id": "a", "name": "测试节点 A"}, {"id": "b", "name": "测试节点 B"}],
+    "selected": "a",
+    "ready": True,
+    "revision": "1",
+    "results": [],
+}
 
 
 def apply(raw, definitions):
@@ -47,7 +54,9 @@ class Handler(BaseHTTPRequestHandler):
         self.wfile.write(body)
 
     def do_GET(self):
-        if self.path == "/fixture/catalog":
+        if self.path == "/fixture/meta-proxy":
+            self.send(json.dumps(proxy_fixture).encode())
+        elif self.path == "/fixture/catalog":
             self.send(json.dumps(catalog.snapshot()).encode())
         elif self.path == "/fixture/platforms":
             self.send(json.dumps(Platforms.platform_catalog()).encode())
@@ -71,7 +80,26 @@ class Handler(BaseHTTPRequestHandler):
         try:
             body = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
             action = self.path.split("/")[-1]
-            if action == "import-curl":
+            if action == "probe-meta-proxy":
+                result = {
+                    "node_id": body["node_id"],
+                    "kind": body["kind"],
+                    "ok": body["node_id"] == "a",
+                    "status": (400 if body["kind"] == "meta" else 204)
+                    if body["node_id"] == "a"
+                    else None,
+                    "message": "HTTPS 可达" if body["node_id"] == "a" else "连接超时",
+                    "elapsed_ms": 123,
+                    "checked_at": "2026-09-15T04:00:00Z",
+                }
+            elif action == "save-meta-proxy":
+                proxy_fixture["selected"] = body["node_id"]
+                proxy_fixture["revision"] = str(int(proxy_fixture["revision"]) + 1)
+                result = proxy_fixture
+            elif action == "refresh-meta-proxy":
+                proxy_fixture["refresh"] = {"running": False, "ok": True}
+                result = {"running": True}
+            elif action == "import-curl":
                 result = {"definition": import_curl(body["text"])}
             else:
                 result = catalog.mutate(action, body)
@@ -95,6 +123,29 @@ def run():
         page.on("pageerror", lambda error: errors.append(str(error)))
         page.goto(f"http://127.0.0.1:{server.server_port}/")
         page.get_by_text("接入你的第一个 API", exact=True).wait_for()
+        page.locator("#meta-proxy-open").click()
+        page.locator("#proxy-rows tr").nth(1).wait_for()
+        page.locator("#proxy-test-all").click()
+        page.get_by_text("检测完成：2/2。当前节点未改变。", exact=True).wait_for()
+        assert proxy_fixture["selected"] == "a"
+        page.locator("#proxy-meta-all").click()
+        page.locator("#proxy-rows").get_by_text(
+            "HTTPS 可达 · 123 ms · HTTP 400", exact=False
+        ).wait_for()
+        page.locator("#proxy-rows tr").nth(1).get_by_role("button", name="选择", exact=True).click()
+        page.locator("#confirm-yes").click()
+        page.get_by_text("当前固定节点：测试节点 B", exact=True).wait_for()
+        page.screenshot(path=str(output / "proxy-management.png"), animations="disabled")
+        page.set_viewport_size({"width": 390, "height": 844})
+        assert page.locator("#meta-proxy-dialog").evaluate(
+            "node => node.scrollWidth <= node.clientWidth"
+        )
+        page.screenshot(path=str(output / "proxy-management-mobile.png"), animations="disabled")
+        page.locator("#proxy-refresh").click()
+        page.get_by_text("订阅已刷新，请检测节点后手动选择。", exact=True).wait_for()
+        assert proxy_fixture["selected"] == "b"
+        page.locator("#meta-proxy-close").click()
+        page.set_viewport_size({"width": 1200, "height": 900})
         page.locator("#add").click()
         page.locator("#tab-form").click()
         page.locator("#name").fill("query_items")

@@ -68,6 +68,10 @@
  <div id="meta-proxy-error" class="notice error" role="alert" hidden></div>
  <p id="meta-proxy-current" class="hint"></p>
  <label>固定节点<select id="meta-proxy-select"></select></label>
+ <div class="proxy-actions"><button id="proxy-refresh">刷新订阅节点</button><button id="proxy-reload">重新读取目录</button><button id="proxy-test-all">全部测速</button><button id="proxy-meta-all">全部检测 Meta</button></div>
+ <p class="hint">测速是 HTTPS 请求耗时，不是下载带宽。Meta 检测不携带 Token；可达不代表业务权限有效。检测不会改变当前节点。结果保留至插件重载。</p>
+ <p id="proxy-progress" class="hint" role="status" aria-live="polite"></p>
+ <div class="proxy-table-wrap"><table><thead><tr><th>节点</th><th>测速</th><th>Meta 连通性</th><th>操作</th></tr></thead><tbody id="proxy-rows"></tbody></table></div>
  <p class="hint">修改节点只允许管理员在这里保存，Agent 无法通过工具参数选择节点。保存后会取消旧 Meta 工具的本地等待请求，已发送请求无法撤回。</p></div>
  <div class="dialog-actions"><button id="meta-proxy-close">关闭</button><button id="meta-proxy-save" class="primary">保存固定节点</button></div>
 </dialog>
