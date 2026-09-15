@@ -92,7 +92,7 @@ class ProxyDiagnostics:
         async with self.refresh_lock:
             reader = writer = None
             try:
-                async with asyncio.timeout(180):
+                async with asyncio.timeout(900):
                     reader, writer = await asyncio.open_unix_connection(
                         str(self.nodes.path.parent / "proxy-admin.sock")
                     )

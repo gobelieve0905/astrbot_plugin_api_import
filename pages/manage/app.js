@@ -155,11 +155,11 @@ $('proxy-meta-all').onclick = () => runProxyTests(proxyState?.nodes || [], 'meta
 $('proxy-reload').onclick = () => { if (!proxyWorking) { proxyResults.clear(); openMetaProxy(); } };
 $('proxy-refresh').onclick = async () => {
   if (proxyWorking) return;
-  setProxyWorking(true); $('proxy-progress').textContent = '正在刷新订阅，通常需要几十秒；不会自动切换节点…';
+  setProxyWorking(true); $('proxy-progress').textContent = '正在备份并刷新订阅，可能需要数分钟；不会自动切换节点…';
   try {
     await bridge.apiPost('refresh-meta-proxy', {});
     let finished = false;
-    for (let i = 0; i < 100; i++) {
+    for (let i = 0; i < 450; i++) {
       await new Promise(resolve => setTimeout(resolve, 2000));
       proxyState = await bridge.apiGet('meta-proxy');
       if (!proxyState.refresh?.running) {
