@@ -116,7 +116,15 @@ def sanitize_error(text, request):
 
 
 class Executor:
-    def __init__(self, data_dir: Path, client=None, *, meta_proxy=None, meta_proxy_resolver=None):
+    def __init__(
+        self,
+        data_dir: Path,
+        client=None,
+        *,
+        meta_proxy=None,
+        meta_proxy_resolver=None,
+        proxy_manager_resolver=None,
+    ):
         self.data_dir = Path(data_dir)
         self.client = client or httpx.AsyncClient(follow_redirects=False, trust_env=False)
         self.meta_client = (
@@ -126,6 +134,10 @@ class Executor:
         )
         self.meta_proxy_resolver = meta_proxy_resolver
         self.fixed_proxy_clients = {}
+        self.proxy_manager_resolver = proxy_manager_resolver
+        self.proxy_manager_clients = {}
+        self.proxy_manager_revision = None
+        self.proxy_manager_lock = asyncio.Lock()
         self.saved_results = {}
         self.history = deque(maxlen=50)
         self.semaphore = asyncio.Semaphore(4)
@@ -140,6 +152,22 @@ class Executor:
             await self.meta_client.aclose()
         for client in self.fixed_proxy_clients.values():
             await client.aclose()
+        for client in self.proxy_manager_clients.values():
+            await client.aclose()
+
+    async def _proxy_manager_client(self, proxy: str, revision: str):
+        async with self.proxy_manager_lock:
+            if self.proxy_manager_revision != revision:
+                old_clients = tuple(self.proxy_manager_clients.values())
+                self.proxy_manager_clients.clear()
+                self.proxy_manager_revision = revision
+                for old_client in old_clients:
+                    await old_client.aclose()
+            client = self.proxy_manager_clients.get(proxy)
+            if client is None:
+                client = httpx.AsyncClient(proxy=proxy, follow_redirects=False, trust_env=False)
+                self.proxy_manager_clients[proxy] = client
+            return client
 
     async def read_result(self, definition, arguments, guard):
         from .meta_platform import prepare
@@ -195,6 +223,7 @@ class Executor:
     ) -> dict:
         started = time.monotonic()
         result = {"ok": False, "tool": definition.tool_name}
+        network_route = "direct"
         try:
             if self.closed or not definition.enabled or not guard():
                 raise ExecutionError("工具已停用或插件已卸载")
@@ -286,18 +315,28 @@ class Executor:
                 if is_meta:
                     url, kwargs = prepare(definition, arguments, self.permitted)
                 async with asyncio.timeout(request.get("timeout", 30)):
-                    client = (
-                        self.meta_client
-                        if is_meta and self.meta_client is not None
-                        else self.client
-                    )
-                    if is_meta and self.meta_proxy_resolver is not None:
+                    lease = self.proxy_manager_resolver() if self.proxy_manager_resolver else None
+                    if lease is not None:
+                        from .proxy_manager_integration import proxy_for_url
+
+                        try:
+                            proxy = proxy_for_url(lease, url)
+                        except (KeyError, TypeError, ValueError):
+                            raise ExecutionError(
+                                "代理管理中心没有提供当前请求所需的有效入口，API 请求已停止"
+                            ) from None
+                        client = await self._proxy_manager_client(proxy, lease["revision"])
+                        network_route = "proxy_manager"
+                    elif is_meta and self.meta_proxy_resolver is not None:
                         proxy = self.meta_proxy_resolver()
                         if proxy not in self.fixed_proxy_clients:
                             self.fixed_proxy_clients[proxy] = httpx.AsyncClient(
                                 proxy=proxy, follow_redirects=False, trust_env=False
                             )
                         client = self.fixed_proxy_clients[proxy]
+                        network_route = "configured_proxy"
+                    else:
+                        client = self.meta_client if is_meta and self.meta_client else self.client
                     async with client.stream(
                         request["method"],
                         url,
@@ -429,12 +468,7 @@ class Executor:
         except (httpx.HTTPError, TimeoutError) as exc:
             result["error"] = "网络请求失败或超时；未自动重试，写入操作结果可能未知"
             result["network_error_type"] = type(exc).__name__
-            result["network_route"] = (
-                "configured_proxy"
-                if definition.connection.get("platform") == "meta_marketing"
-                and (self.meta_client is not None or self.meta_proxy_resolver is not None)
-                else "direct"
-            )
+            result["network_route"] = network_route
             result["network_hint"] = (
                 "请检查服务器网络和代理路由；网络失败不代表账号 ID、Token 或后台操作权限无效。"
             )

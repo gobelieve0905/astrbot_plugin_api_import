@@ -3,12 +3,17 @@
 - `definitions.py`：接口定义校验，与平台无关。
 - `engine.py`：独立的请求执行与结果处理，不依赖 AstrBot。
 - `main.py`：工具注册和管理员命令，生命周期清理。
+- `proxy_manager_integration.py`：代理管理中心公开 lease 校验；`engine.py` 按每次请求取得的 lease 路由 HTTP(S)。
 
 本地：`uv venv .venv`，`uv pip install --python .venv/bin/python -r requirements.txt ruff`。
 检查：`.venv/bin/ruff check .`、`.venv/bin/ruff format --check .`、`.venv/bin/python -B -m unittest discover -s tests -v`。
 真实框架隔离检查：在运行镜像的无网络容器内执行 `tests/integration_offline.py`，不启动平台适配器或发送消息。
 
 开发在 develop，中文提交；检查通过后明确推送 develop，再按既有运维入口对固定 SHA 备份、加部署锁、隔离验证和热加载。main 仅保留初始骨架，等待用户验收决定合并；所有标签由用户手工管理。开发文档和测试通过 export-ignore 从源码安装归档排除。
+
+## 0.1.4 代理管理中心协议
+
+`proxy_manager_integration.json` 必须包含在源码归档中；插件配置 `manage_egress` 默认关闭。开启后，`Executor` 在每次 HTTP(S) 调用前通过 AstrBot 已注册 Star 实例调用公开 `get_proxy_manager_lease`，不读取宿主代理环境。lease revision 改变时关闭旧客户端，失效、缺少管理中心或入口错误时不创建直连客户端。Meta 固定节点探测、刷新与保存在该模式下拒绝。部署验收覆盖 lease 校验、专用入口路由、修订切换和失败关闭；服务器验收不请求外部业务 API、不发送消息。当前声明与入口状态不等于请求级出口验证。
 
 ## 2026-09-11 验证
 
