@@ -336,7 +336,11 @@ class Executor:
                         client = self.fixed_proxy_clients[proxy]
                         network_route = "configured_proxy"
                     else:
-                        client = self.meta_client if is_meta and self.meta_client else self.client
+                        if is_meta and self.meta_client is not None:
+                            client = self.meta_client
+                            network_route = "configured_proxy"
+                        else:
+                            client = self.client
                     async with client.stream(
                         request["method"],
                         url,
