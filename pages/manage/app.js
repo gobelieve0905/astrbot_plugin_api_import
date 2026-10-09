@@ -94,17 +94,11 @@ async function openMetaProxy() {
     const blank = el('option', '请选择固定节点'); blank.value = ''; $('meta-proxy-select').append(blank);
     for (const node of proxyState.nodes) { const option = el('option', node.name); option.value = node.id; $('meta-proxy-select').append(option); }
     $('meta-proxy-select').value = proxyState.ready ? proxyState.selected : '';
-    const managed = proxyState.managed_egress === true;
-    $('meta-proxy-mode').textContent = managed
-      ? '已启用代理管理中心接入。Meta 与其他 API 请求使用组件专用入口；固定节点设置和节点诊断已停用。出口验证状态以代理管理中心为准。'
-      : '所有 Meta 接入共用所选节点。节点不可用时停止请求，不自动切换、不回退直连。';
-    $('meta-proxy-current').textContent = managed
-      ? '每次工具请求前重新申请入口；固定节点目录不参与。'
-      : proxyState.ready ? `当前固定节点：${proxyState.nodes.find(n => n.id === proxyState.selected).name}` : '尚未选择可用的固定节点，Meta 请求已暂停。';
-    if (!managed && !proxyState.nodes.length) throw new Error('服务器尚未配置固定节点目录，请联系管理员。');
+    $('meta-proxy-current').textContent = proxyState.ready ? `当前固定节点：${proxyState.nodes.find(n => n.id === proxyState.selected).name}` : '尚未选择可用的固定节点，Meta 请求已暂停。';
+    if (!proxyState.nodes.length) throw new Error('服务器尚未配置固定节点目录，请联系管理员。');
     for (const result of proxyState.results || []) proxyResults.set(`${result.node_id}:${result.kind}`, result);
     renderProxyNodes();
-    $('meta-proxy-save').disabled = proxyWorking || managed;
+    $('meta-proxy-save').disabled = proxyWorking;
   } catch (error) { $('meta-proxy-error').textContent = error.message; $('meta-proxy-error').hidden = false; }
 }
 function proxyResultText(id, kind) {
@@ -120,7 +114,7 @@ function renderProxyNodes() {
     row.append(el('td', proxyResultText(n.id, 'latency')), el('td', proxyResultText(n.id, 'meta')));
     const actions = el('td');
     for (const [label, callback] of [['测速', () => runProxyTests([n], 'latency')], ['检测 Meta', () => runProxyTests([n], 'meta')], ['选择', () => { $('meta-proxy-select').value = n.id; $('meta-proxy-save').click(); }]]) {
-      const b = el('button', label); b.disabled = proxyWorking || proxyState?.managed_egress === true; b.onclick = callback; actions.append(b);
+      const b = el('button', label); b.disabled = proxyWorking; b.onclick = callback; actions.append(b);
     }
     row.append(actions);
     ['节点', '测速', 'Meta 连通性', '操作'].forEach((label, i) => { row.children[i].dataset.label = label; });
@@ -133,8 +127,7 @@ function renderProxyNodes() {
 }
 function setProxyWorking(value) {
   proxyWorking = value;
-  const disabled = value || proxyState?.managed_egress === true;
-  for (const id of ['proxy-refresh', 'proxy-reload', 'proxy-test-all', 'proxy-meta-all', 'meta-proxy-save', 'meta-proxy-select']) $(id).disabled = disabled;
+  for (const id of ['proxy-refresh', 'proxy-reload', 'proxy-test-all', 'proxy-meta-all', 'meta-proxy-save', 'meta-proxy-select']) $(id).disabled = value;
   renderProxyNodes();
 }
 async function runProxyTests(nodes, kind) {

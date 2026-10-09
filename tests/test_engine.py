@@ -5,7 +5,6 @@ import tempfile
 import types
 import unittest
 from pathlib import Path
-from unittest.mock import patch
 
 import httpx
 
@@ -239,55 +238,6 @@ class ExecutorTest(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(result["ok"])
         self.assertNotIn("sensitive", json.dumps(result))
         self.assertEqual(len(self.calls), 1)
-
-    async def test_proxy_manager_lease_routes_request_and_rebuilds_on_revision(self):
-        requests = []
-        clients = []
-        original_factory = Engine.httpx.AsyncClient
-
-        def build_client(**kwargs):
-            client = original_factory(
-                transport=httpx.MockTransport(
-                    lambda request: (
-                        requests.append(request) or httpx.Response(200, json={"ok": True})
-                    )
-                )
-            )
-            clients.append(client)
-            return client
-
-        revision = ["rev-a"]
-        self.executor.proxy_manager_resolver = lambda: {
-            "revision": revision[0],
-            "http_proxy": "http://127.0.0.1:17890",
-            "https_proxy": "http://127.0.0.1:17890",
-        }
-        with patch.object(Engine.httpx, "AsyncClient", side_effect=build_client) as factory:
-            first = await self.executor.execute(definition(), {"id": "1"})
-            revision[0] = "rev-b"
-            second = await self.executor.execute(definition(), {"id": "2"})
-
-        self.assertTrue(first["ok"] and second["ok"])
-        self.assertEqual(len(requests), 2)
-        self.assertEqual(len(clients), 2)
-        self.assertTrue(clients[0].is_closed)
-        self.assertEqual(
-            factory.call_args_list[0].kwargs,
-            {
-                "proxy": "http://127.0.0.1:17890",
-                "follow_redirects": False,
-                "trust_env": False,
-            },
-        )
-
-    async def test_proxy_manager_failure_stops_without_direct_request(self):
-        self.executor.proxy_manager_resolver = lambda: (_ for _ in ()).throw(
-            Engine.ExecutionError("代理管理中心入口不可用")
-        )
-        result = await self.executor.execute(definition(), {"id": "1"})
-        self.assertFalse(result["ok"])
-        self.assertIn("代理管理中心入口不可用", result["error"])
-        self.assertFalse(self.calls)
 
     async def test_closed_and_disabled(self):
         self.assertFalse(

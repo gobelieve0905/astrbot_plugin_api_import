@@ -1,7 +1,0 @@
-{
-  "protocol": "astrbot.proxy-manager/v1",
-  "mode": "astrbot-environment",
-  "protocols": ["http", "https"],
-  "restart": "process",
-  "auto_apply": false
-}

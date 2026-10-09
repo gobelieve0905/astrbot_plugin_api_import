@@ -16,11 +16,6 @@ from .engine import Executor
 from .importing import import_curl
 from .platforms import platform_catalog
 from .proxy_diagnostics import ProxyDiagnostics
-from .proxy_manager_integration import (
-    ProxyManagerError,
-    management_enabled,
-    request_lease,
-)
 from .proxy_nodes import FixedProxyNodes
 from .result_pages import tool_parameters
 from .task_gateway import TaskGateway
@@ -131,24 +126,6 @@ class ApiImportPlugin(Star):
             raise DefinitionError("存在与其他插件同名的工具，请修改接口调用名称 tool_name")
         return [ImportedTool(item, self.executor) for item in definitions if item.enabled]
 
-    def _proxy_manager_lease(self):
-        try:
-            if not management_enabled(self.config):
-                return None
-            return request_lease(self.context)
-        except ProxyManagerError as exc:
-            from .engine import ExecutionError
-
-            raise ExecutionError(str(exc)) from None
-
-    def _require_manual_proxy_mode(self):
-        try:
-            managed = management_enabled(self.config)
-        except ProxyManagerError as exc:
-            raise DefinitionError(str(exc)) from None
-        if managed:
-            raise DefinitionError("已启用代理管理中心接入，固定节点网络检测与订阅刷新已停用")
-
     def _apply_saved(self, raw, definitions):
         # No awaits between validation, atomic config persistence and registry swap.
         # A failed write restores the old registry and leaves cached tools usable.
@@ -179,7 +156,6 @@ class ApiImportPlugin(Star):
         self.executor = Executor(
             StarTools.get_data_dir("astrbot_plugin_api_import") / "results",
             meta_proxy_resolver=self.proxy_nodes.resolve,
-            proxy_manager_resolver=self._proxy_manager_lease,
         )
         self.executor.permitted = lambda connection_id, operation: any(
             tool.available
@@ -210,22 +186,15 @@ class ApiImportPlugin(Star):
 
     async def page_meta_proxy(self):
         try:
-            managed = management_enabled(self.config)
-            if managed:
-                state = {"nodes": [], "selected": "", "ready": False, "revision": ""}
-            else:
-                state = self.proxy_nodes.snapshot()
-                state["results"] = list(self.proxy_diagnostics.results.values())
-            state["results"] = state.get("results", [])
+            state = self.proxy_nodes.snapshot()
+            state["results"] = list(self.proxy_diagnostics.results.values())
             state["refresh"] = self.proxy_refresh_status
-            state["managed_egress"] = managed
             return json_response(state)
-        except (DefinitionError, OSError, ProxyManagerError) as exc:
-            return error_response(str(exc), status_code=503)
+        except (DefinitionError, OSError):
+            return error_response("固定代理节点目录不可用，请联系管理员", status_code=503)
 
     async def page_probe_meta_proxy(self):
         try:
-            self._require_manual_proxy_mode()
             if self.closed or self.proxy_refresh_status["running"]:
                 raise DefinitionError("插件正在卸载或节点正在刷新，请稍后重试")
             payload = await request.json()
@@ -242,10 +211,6 @@ class ApiImportPlugin(Star):
             return error_response("代理检测失败，请刷新后重试", status_code=503)
 
     async def page_refresh_meta_proxy(self):
-        try:
-            self._require_manual_proxy_mode()
-        except DefinitionError as exc:
-            return error_response(str(exc))
         if self.closed or self.proxy_refresh_status["running"] or self.proxy_diagnostics.running:
             return error_response("已有刷新或检测在进行，请稍后重试")
         self.proxy_refresh_status = {"running": True}
@@ -268,7 +233,6 @@ class ApiImportPlugin(Star):
 
     async def page_save_meta_proxy(self):
         try:
-            self._require_manual_proxy_mode()
             payload = await request.json()
             if self.proxy_refresh_status["running"]:
                 raise DefinitionError("订阅正在刷新，请完成后再选择节点")
